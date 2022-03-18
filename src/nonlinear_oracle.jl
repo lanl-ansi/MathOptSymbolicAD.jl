@@ -4,7 +4,7 @@ abstract type _AbstractFunction end
 
 struct _Node
     head::_Operation
-    hash::UInt64
+    hash::UInt
     index::Int
     operation::Symbol
     children::Union{Nothing,Vector{_Node}}
@@ -20,7 +20,7 @@ struct _Node
     end
     function _Node(::_AbstractFunction, operation::Symbol, children::_Node...)
         h = hash(operation, _hash(children...))
-        return new(_OP_OPERATION, h, UInt64(0), operation, collect(children))
+        return new(_OP_OPERATION, h, UInt(0), operation, collect(children))
     end
 end
 
@@ -135,7 +135,7 @@ mutable struct _NonlinearOracle <: MOI.AbstractNLPEvaluator
     use_threads::Bool
     objective::Union{Nothing,_Function}
     constraints::Vector{_Function}
-    symbolic_functions::Dict{UInt64,_SymbolicsFunction}
+    symbolic_functions::Dict{UInt,_SymbolicsFunction}
     offsets::Vector{Vector{_ConstraintOffset}}
     eval_constraint_timer::Float64
     eval_constraint_jacobian_timer::Float64
@@ -161,7 +161,7 @@ function MOI.initialize(oracle::_NonlinearOracle, features::Vector{Symbol})
         end
     end
     if oracle.use_threads
-        offsets = Dict{UInt64,Vector{_ConstraintOffset}}(
+        offsets = Dict{UInt,Vector{_ConstraintOffset}}(
             h => _ConstraintOffset[] for h in keys(oracle.symbolic_functions)
         )
         index, ∇f_offset, ∇²f_offset = 1, 1, obj_hess_offset + 1
@@ -390,7 +390,7 @@ function nlp_block_data(d::MOI.AbstractNLPEvaluator; use_threads::Bool = false)
         use_threads,
         objective,
         functions,
-        Dict{UInt64,_SymbolicsFunction}(),
+        Dict{UInt,_SymbolicsFunction}(),
         Vector{_ConstraintOffset}[],
         0.0,
         0.0,
