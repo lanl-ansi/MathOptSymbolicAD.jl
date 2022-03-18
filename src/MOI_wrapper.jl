@@ -3,7 +3,7 @@ struct Optimizer{O} <: MOI.AbstractOptimizer
     inner::O
     function Optimizer(inner; use_threads::Bool = false)
         model = MOI.instantiate(inner)
-        return new{typeof(inner)}(use_threads, model)
+        return new{typeof(model)}(use_threads, model)
     end
 end
 

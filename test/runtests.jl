@@ -290,6 +290,19 @@ function test_optimizer_clnlbeam(; N::Int = 10)
     return
 end
 
+function test_optimizer_case5_pjm()
+    model = power_model("pglib_opf_case5_pjm.m")
+    set_optimizer(model, () -> SymbolicAD.Optimizer(Ipopt.Optimizer))
+    optimize!(model)
+    Test.@test isapprox(
+        objective_value(model),
+        4.3879727096486897e+02,
+        atol = 1e-6,
+    )
+    return
+end
+
+
 end  # module
 
 RunTests.runtests()
