@@ -296,7 +296,7 @@ function test_optimizer_case5_pjm()
     optimize!(model)
     Test.@test isapprox(
         objective_value(model),
-        4.3879727096486897e+02,
+        1.7551890838594765e+04,
         atol = 1e-6,
     )
     return

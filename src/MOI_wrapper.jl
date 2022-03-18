@@ -25,6 +25,10 @@ function MOI.supports_constraint(
     return MOI.supports_constraint(model.inner, f, s)
 end
 
+function MOI.supports(model::Optimizer, attr::MOI.AnyAttribute, args...)
+    return MOI.supports(model.inner, attr, args...)
+end
+
 function MOI.copy_to(model::Optimizer, src::MOI.ModelLike)
     return MOI.copy_to(model.inner, src)
 end
