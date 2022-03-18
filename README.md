@@ -2,9 +2,10 @@
 
 **This is package is an experimental work-in-progress. Use at your own risk.**
 
-This Package contains some experiments with symbolic differentiation of JuMP
-models. It is inspired by some work on coin-or/gravity, which made the
-following observations:
+This package contains some experiments with symbolic differentiation of JuMP
+models. It is inspired by some work on
+[coin-or/gravity](https://github.com/coin-or/Gravity), which made the following
+observations:
 
  * Symbolic differentiation is slow
  * Most NLP's have a lot of structure
@@ -28,5 +29,22 @@ fill in the 10_000 derivative functions without having to do other calculus.
 There are a couple of options in the evaluation functions, each with their own
 performance tradeoffs. If we want to consider parallel evaluation, then we
 need to use the offsets to allow out-of-order execution. I've threaded on the
-hash of the symbolic constraints because the constraints share the temporary
-storage in the _SymbolicsFunction.
+hash of the symbolic constraints because constraints based on the same symbolic
+template share a temporary storage cache in the `_SymbolicsFunction`.
+
+## Installation
+
+Install SymbolicAD as follows:
+```julia
+import Pkg
+Pkg.add("https://github.com/odow/SymbolicAD.jl)
+```
+
+## Use with JuMP
+
+```julia
+using JuMP
+import Ipopt
+import SymbolicAD
+model = Model(() -> SymbolicAD.Optimizer(Ipopt.Optimizer))
+```

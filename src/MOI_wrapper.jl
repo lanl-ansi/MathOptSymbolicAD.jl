@@ -1,8 +1,9 @@
 struct Optimizer{O} <: MOI.AbstractOptimizer
     use_threads::Bool
     inner::O
-    function Optimizer(inner::MOI.AbstractOptimizer; use_threads::Bool = false)
-        return new{typeof(inner)}(use_threads, inner)
+    function Optimizer(inner; use_threads::Bool = false)
+        model = MOI.instantiate(inner)
+        return new{typeof(inner)}(use_threads, model)
     end
 end
 

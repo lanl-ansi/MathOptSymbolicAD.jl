@@ -259,7 +259,7 @@ end
 
 function test_optimizer_clnlbeam(; N::Int = 10)
     h = 1 / N
-    model = Model(() -> SymbolicAD.Optimizer(Ipopt.Optimizer()))
+    model = Model(() -> SymbolicAD.Optimizer(Ipopt.Optimizer))
     @variable(model, -1 <= t[1:(N+1)] <= 1)
     @variable(model, -0.05 <= x[1:(N+1)] <= 0.05)
     @variable(model, u[1:(N+1)])
