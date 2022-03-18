@@ -8,6 +8,7 @@ struct Optimizer{O} <: MOI.AbstractOptimizer
 end
 
 function MOI.set(model::Optimizer, ::MOI.NLPBlock, value)
+    @info("Replacing NLPBlock with the SymbolicAD one")
     nlp_block = SymbolicAD.nlp_block_data(value.evaluator)
     MOI.set(model.inner, MOI.NLPBlock(), nlp_block)
     return
@@ -30,7 +31,12 @@ function MOI.supports(model::Optimizer, attr::MOI.AnyAttribute, args...)
 end
 
 function MOI.copy_to(model::Optimizer, src::MOI.ModelLike)
-    return MOI.copy_to(model.inner, src)
+    index_map = MOI.copy_to(model.inner, src)
+    if MOI.NLPBlock() in MOI.get(src, MOI.ListOfModelAttributesSet())
+        block = MOI.get(src, MOI.NLPBlock())
+        MOI.set(model, MOI.NLPBlock(), block)
+    end
+    return index_map
 end
 
 function MOI.set(model::Optimizer, attr::MOI.AnyAttribute, args...)
