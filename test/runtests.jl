@@ -294,11 +294,10 @@ function test_optimizer_case5_pjm()
     model = power_model("pglib_opf_case5_pjm.m")
     set_optimizer(model, () -> SymbolicAD.Optimizer(Ipopt.Optimizer))
     optimize!(model)
-    Test.@test isapprox(
-        objective_value(model),
-        1.7551890838594765e+04,
-        atol = 1e-6,
-    )
+    symbolic_obj = objective_value(model)
+    set_optimizer(model, Ipopt.Optimizer)
+    optimize!(model)
+    Test.@test isapprox(objective_value(model), symbolic_obj, atol = 1e-6)
     return
 end
 
