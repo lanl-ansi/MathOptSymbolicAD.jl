@@ -12,7 +12,13 @@ struct _Node
     function _Node(f::_AbstractFunction, coefficient::Float64)
         push!(f.data, coefficient)
         index = length(f.data)
-        return new(_OP_COEFFICIENT, hash(_OP_COEFFICIENT), index, :NONE, nothing)
+        return new(
+            _OP_COEFFICIENT,
+            hash(_OP_COEFFICIENT),
+            index,
+            :NONE,
+            nothing,
+        )
     end
     function _Node(f::_AbstractFunction, variable::MOI.VariableIndex)
         index = get!(f.variables, variable, length(f.variables) + 1)
@@ -45,7 +51,7 @@ end
 
 function _Node(f::_Function, expr::Expr)
     if isexpr(expr, :call)
-        nodes = [_Node(f, expr.args[i]) for i = 2:length(expr.args)]
+        nodes = [_Node(f, expr.args[i]) for i in 2:length(expr.args)]
         return _Node(f, expr.args[1], nodes...)
     else
         @assert isexpr(expr, :ref)
@@ -118,7 +124,8 @@ function _SymbolicsFunction(f::_Function, features::Vector{Symbol})
         # `hessian_lagrangian_structure` calls later.
         ∇²f_expr = [V[i] for i in 1:length(I) if I[i] >= J[i]]
         ∇²f_structure = [(I[i], J[i]) for i in 1:length(I) if I[i] >= J[i]]
-        _, h! = Symbolics.build_function(∇²f_expr, p, x; expression = Val{false})
+        _, h! =
+            Symbolics.build_function(∇²f_expr, p, x; expression = Val{false})
         h_cache = zeros(length(∇²f_structure))
     else
         h!, h_cache, ∇²f_structure = nothing, Float64[], Tuple{Int,Int}[]
@@ -166,7 +173,10 @@ function MOI.initialize(oracle::_NonlinearOracle, features::Vector{Symbol})
         )
         index, ∇f_offset, ∇²f_offset = 1, 1, obj_hess_offset + 1
         for f in oracle.constraints
-            push!(offsets[f.expr.hash], _ConstraintOffset(index, ∇f_offset, ∇²f_offset))
+            push!(
+                offsets[f.expr.hash],
+                _ConstraintOffset(index, ∇f_offset, ∇²f_offset),
+            )
             index += 1
             symbolic_function = oracle.symbolic_functions[f.expr.hash]
             ∇f_offset += length(symbolic_function.g)
@@ -206,7 +216,6 @@ function _eval_gradient(
     return f.g
 end
 
-
 function _eval_hessian(
     oracle::_NonlinearOracle,
     func::_Function,
@@ -220,8 +229,10 @@ function _eval_hessian(
     return f.H
 end
 
-
-function MOI.eval_objective(oracle::_NonlinearOracle, x::AbstractVector{Float64})
+function MOI.eval_objective(
+    oracle::_NonlinearOracle,
+    x::AbstractVector{Float64},
+)
     @assert oracle.objective !== nothing
     return _eval_function(oracle, oracle.objective, x)
 end
@@ -254,7 +265,7 @@ function MOI.eval_constraint(
             end
         end
     else
-        for row = 1:length(g)
+        for row in 1:length(g)
             g[row] = _eval_function(oracle, oracle.constraints[row], x)
         end
     end
@@ -264,7 +275,7 @@ end
 
 function MOI.jacobian_structure(oracle::_NonlinearOracle)
     structure = Tuple{Int,Int}[]
-    for row = 1:length(oracle.constraints)
+    for row in 1:length(oracle.constraints)
         c = oracle.constraints[row]
         for x in sort(collect(keys(c.variables)); by = v -> c.variables[v])
             push!(structure, (row, x.value))
@@ -284,14 +295,14 @@ function MOI.eval_constraint_jacobian(
             for c in offset
                 func = oracle.constraints[c.index]
                 g = _eval_gradient(oracle, func, x)
-                for i = 1:length(g)
+                for i in 1:length(g)
                     @inbounds J[c.∇f_offset+i-1] = g[i]
                 end
             end
         end
     else
         k = 1
-        for i = 1:length(oracle.constraints)
+        for i in 1:length(oracle.constraints)
             g = _eval_gradient(oracle, oracle.constraints[i], x)
             for gi in g
                 J[k] = gi
@@ -335,7 +346,7 @@ function MOI.eval_hessian_lagrangian(
     hessian_offset = 0
     if oracle.objective !== nothing
         h = _eval_hessian(oracle, oracle.objective, x)
-        for i = 1:length(h)
+        for i in 1:length(h)
             H[i] = σ * h[i]
         end
         hessian_offset += length(h)
@@ -345,14 +356,14 @@ function MOI.eval_hessian_lagrangian(
             for c in offset
                 func = oracle.constraints[c.index]
                 h = _eval_hessian(oracle, func, x)
-                for i = 1:length(h)
+                for i in 1:length(h)
                     @inbounds H[c.∇²f_offset+i-1] = μ[c.index] * h[i]
                 end
             end
         end
     else
         k = hessian_offset + 1
-        for i = 1:length(oracle.constraints)
+        for i in 1:length(oracle.constraints)
             h = _eval_hessian(oracle, oracle.constraints[i], x)
             for nzval in h
                 H[k] = μ[i] * nzval
@@ -381,7 +392,7 @@ function nlp_block_data(d::MOI.AbstractNLPEvaluator; use_threads::Bool = false)
     n = length(d.constraints)
     functions = Vector{_Function}(undef, n)
     bounds = Vector{MOI.NLPBoundsPair}(undef, n)
-    for i = 1:n
+    for i in 1:n
         f, bound = _nonlinear_constraint(MOI.constraint_expr(d, i))
         functions[i] = f
         bounds[i] = bound

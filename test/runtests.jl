@@ -217,11 +217,11 @@ function run_clnlbeam_benchmark(; N::Int)
         model,
         Min,
         sum(
-            h / 2 * (u[i+1]^2 + u[i]^2) + 350 * h / 2 * (cos(t[i+1]) + cos(t[i])) for
-            i = 1:N
+            h / 2 * (u[i+1]^2 + u[i]^2) +
+            350 * h / 2 * (cos(t[i+1]) + cos(t[i])) for i in 1:N
         ),
     )
-    for i = 1:N
+    for i in 1:N
         @NLconstraint(model, x[i+1] - x[i] == h / 2 * (sin(t[i+1]) + sin(t[i])))
         @constraint(model, t[i+1] - t[i] == h / 2 * (u[i+1] - u[i]))
     end
@@ -267,11 +267,11 @@ function test_optimizer_clnlbeam(; N::Int = 10)
         model,
         Min,
         sum(
-            h / 2 * (u[i+1]^2 + u[i]^2) + 350 * h / 2 * (cos(t[i+1]) + cos(t[i])) for
-            i = 1:N
+            h / 2 * (u[i+1]^2 + u[i]^2) +
+            350 * h / 2 * (cos(t[i+1]) + cos(t[i])) for i in 1:N
         ),
     )
-    for i = 1:N
+    for i in 1:N
         @NLconstraint(model, x[i+1] - x[i] == h / 2 * (sin(t[i+1]) + sin(t[i])))
         @constraint(model, t[i+1] - t[i] == h / 2 * (u[i+1] - u[i]))
     end
@@ -282,7 +282,7 @@ function test_optimizer_clnlbeam(; N::Int = 10)
     Test.@test isapprox(
         sum(
             h / 2 * (u_sol[i+1]^2 + u_sol[i]^2) +
-            350 * h / 2 * (cos(t_sol[i+1]) + cos(t_sol[i])) for i = 1:N
+            350 * h / 2 * (cos(t_sol[i+1]) + cos(t_sol[i])) for i in 1:N
         ),
         350.0;
         atol = 1e-6,
@@ -300,7 +300,6 @@ function test_optimizer_case5_pjm()
     Test.@test isapprox(objective_value(model), symbolic_obj, atol = 1e-6)
     return
 end
-
 
 end  # module
 
