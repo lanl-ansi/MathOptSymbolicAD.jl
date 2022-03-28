@@ -133,20 +133,37 @@ function _SymbolicsFunction(f::_Function, features::Vector{Symbol})
     return _SymbolicsFunction(f, g!, h!, g_cache, h_cache, ∇²f_structure)
 end
 
-struct _ConstraintOffset
-    index::Int
-    ∇f_offset::Int
-    ∇²f_offset::Int
-end
-mutable struct _NonlinearOracle <: MOI.AbstractNLPEvaluator
-    use_threads::Bool
+"""
+    AbstractNonlinearOracleBackend
+
+An abstract type to help dispatch on different implementations of the function
+evaluations.
+"""
+abstract type AbstractNonlinearOracleBackend end
+
+"""
+    DefaultBackend() <: AbstractNonlinearOracleBackend
+
+A simple implementation that loops over the different constraints.
+"""
+struct DefaultBackend <: AbstractNonlinearOracleBackend end
+
+mutable struct _NonlinearOracle{B} <: MOI.AbstractNLPEvaluator
+    backend::B
     objective::Union{Nothing,_Function}
     constraints::Vector{_Function}
     symbolic_functions::Dict{UInt,_SymbolicsFunction}
-    offsets::Vector{Vector{_ConstraintOffset}}
     eval_constraint_timer::Float64
     eval_constraint_jacobian_timer::Float64
     eval_hessian_lagrangian_timer::Float64
+end
+
+function MOI.initialize(
+    ::_NonlinearOracle,
+    ::AbstractNonlinearOracleBackend,
+    ::Vector{Symbol},
+)
+    return
 end
 
 function MOI.initialize(oracle::_NonlinearOracle, features::Vector{Symbol})
@@ -158,34 +175,14 @@ function MOI.initialize(oracle::_NonlinearOracle, features::Vector{Symbol})
         f = oracle.constraints[findfirst(isequal(h), hashes)]
         oracle.symbolic_functions[h] = _SymbolicsFunction(f, features)
     end
-    obj_hess_offset = 0
     if oracle.objective !== nothing
         f = oracle.objective
         h = f.expr.hash
         if !haskey(oracle.symbolic_functions, h)
             oracle.symbolic_functions[h] = _SymbolicsFunction(f, features)
-            obj_hess_offset = length(oracle.symbolic_functions[h].H)
         end
     end
-    if oracle.use_threads
-        offsets = Dict{UInt,Vector{_ConstraintOffset}}(
-            h => _ConstraintOffset[] for h in keys(oracle.symbolic_functions)
-        )
-        index, ∇f_offset, ∇²f_offset = 1, 1, obj_hess_offset + 1
-        for f in oracle.constraints
-            push!(
-                offsets[f.expr.hash],
-                _ConstraintOffset(index, ∇f_offset, ∇²f_offset),
-            )
-            index += 1
-            symbolic_function = oracle.symbolic_functions[f.expr.hash]
-            ∇f_offset += length(symbolic_function.g)
-            ∇²f_offset += length(symbolic_function.H)
-        end
-        for v in values(offsets)
-            push!(oracle.offsets, v)
-        end
-    end
+    MOI.initialize(oracle, oracle.backend, features)
     return
 end
 
@@ -257,17 +254,8 @@ function MOI.eval_constraint(
     x::AbstractVector{Float64},
 )
     start = time()
-    if oracle.use_threads
-        Threads.@threads for offsets in oracle.offsets
-            for c in offsets
-                func = oracle.constraints[c.index]
-                @inbounds g[c.index] = _eval_function(oracle, func, x)
-            end
-        end
-    else
-        for row in 1:length(g)
-            g[row] = _eval_function(oracle, oracle.constraints[row], x)
-        end
+    for row in 1:length(g)
+        g[row] = _eval_function(oracle, oracle.constraints[row], x)
     end
     oracle.eval_constraint_timer += time() - start
     return
@@ -290,24 +278,12 @@ function MOI.eval_constraint_jacobian(
     x::AbstractVector{Float64},
 )
     start = time()
-    if oracle.use_threads
-        Threads.@threads for offset in oracle.offsets
-            for c in offset
-                func = oracle.constraints[c.index]
-                g = _eval_gradient(oracle, func, x)
-                for i in 1:length(g)
-                    @inbounds J[c.∇f_offset+i-1] = g[i]
-                end
-            end
-        end
-    else
-        k = 1
-        for i in 1:length(oracle.constraints)
-            g = _eval_gradient(oracle, oracle.constraints[i], x)
-            for gi in g
-                J[k] = gi
-                k += 1
-            end
+    k = 1
+    for i in 1:length(oracle.constraints)
+        g = _eval_gradient(oracle, oracle.constraints[i], x)
+        for gi in g
+            J[k] = gi
+            k += 1
         end
     end
     oracle.eval_constraint_jacobian_timer += time() - start
@@ -351,42 +327,30 @@ function MOI.eval_hessian_lagrangian(
         end
         hessian_offset += length(h)
     end
-    if oracle.use_threads
-        Threads.@threads for offset in oracle.offsets
-            for c in offset
-                func = oracle.constraints[c.index]
-                h = _eval_hessian(oracle, func, x)
-                for i in 1:length(h)
-                    @inbounds H[c.∇²f_offset+i-1] = μ[c.index] * h[i]
-                end
-            end
-        end
-    else
-        k = hessian_offset + 1
-        for i in 1:length(oracle.constraints)
-            h = _eval_hessian(oracle, oracle.constraints[i], x)
-            for nzval in h
-                H[k] = μ[i] * nzval
-                k += 1
-            end
+    k = hessian_offset + 1
+    for i in 1:length(oracle.constraints)
+        h = _eval_hessian(oracle, oracle.constraints[i], x)
+        for nzval in h
+            H[k] = μ[i] * nzval
+            k += 1
         end
     end
     oracle.eval_hessian_lagrangian_timer += time() - start
     return
 end
 
-function _to_sparse(IJ, V)
-    I, J = [i for (i, _) in IJ], [j for (_, j) in IJ]
-    n = max(maximum(I), maximum(J))
-    return SparseArrays.sparse(I, J, V, n, n)
-end
-
 """
-    nlp_block_data(d::AbstractNLPEvaluator; use_threads::Bool = false)
+    nlp_block_data(
+        d::MOI.AbstractNLPEvaluator;
+        backend::AbstractNonlinearOracleBackend = DefaultBackend(),
+    )
 
 Convert an AbstractNLPEvaluator into a SymbolicAD instance of MOI.NLPBlockData.
 """
-function nlp_block_data(d::MOI.AbstractNLPEvaluator; use_threads::Bool = false)
+function nlp_block_data(
+    d::MOI.AbstractNLPEvaluator;
+    backend::AbstractNonlinearOracleBackend = DefaultBackend(),
+)
     MOI.initialize(d, [:ExprGraph])
     objective = d.has_nlobj ? _Function(MOI.objective_expr(d)) : nothing
     n = length(d.constraints)
@@ -398,14 +362,119 @@ function nlp_block_data(d::MOI.AbstractNLPEvaluator; use_threads::Bool = false)
         bounds[i] = bound
     end
     oracle = _NonlinearOracle(
-        use_threads,
+        backend,
         objective,
         functions,
         Dict{UInt,_SymbolicsFunction}(),
-        Vector{_ConstraintOffset}[],
         0.0,
         0.0,
         0.0,
     )
     return MOI.NLPBlockData(bounds, oracle, d.has_nlobj)
+end
+
+###
+### ThreadedBackend
+###
+
+struct _ConstraintOffset
+    index::Int
+    ∇f_offset::Int
+    ∇²f_offset::Int
+end
+
+struct ThreadedBackend <: AbstractNonlinearOracleBackend
+    offsets::Vector{Vector{_ConstraintOffset}}
+    ThreadedBackend() = new(Vector{_ConstraintOffset}[])
+end
+
+function MOI.initialize(
+    oracle::_NonlinearOracle,
+    backend::ThreadedBackend,
+    ::Vector{Symbol},
+)
+    obj_hess_offset = 0
+    if oracle.objective !== nothing
+        h = oracle.objective.expr.hash
+        obj_hess_offset = length(oracle.symbolic_functions[h].H)
+    end
+    offsets = Dict{UInt,Vector{_ConstraintOffset}}(
+        h => _ConstraintOffset[] for h in keys(oracle.symbolic_functions)
+    )
+    index, ∇f_offset, ∇²f_offset = 1, 1, obj_hess_offset + 1
+    for f in oracle.constraints
+        push!(offsets[f.expr.hash], _ConstraintOffset(index, ∇f_offset, ∇²f_offset))
+        index += 1
+        symbolic_function = oracle.symbolic_functions[f.expr.hash]
+        ∇f_offset += length(symbolic_function.g)
+        ∇²f_offset += length(symbolic_function.H)
+    end
+    for v in values(offsets)
+        push!(backend.offsets, v)
+    end
+    return
+end
+
+function MOI.eval_constraint(
+    oracle::_NonlinearOracle{ThreadedBackend},
+    g::AbstractVector{Float64},
+    x::AbstractVector{Float64},
+)
+    start = time()
+    Threads.@threads for offsets in oracle.backend.offsets
+        for c in offsets
+            func = oracle.constraints[c.index]
+            @inbounds g[c.index] = _eval_function(oracle, func, x)
+        end
+    end
+    oracle.eval_constraint_timer += time() - start
+    return
+end
+
+function MOI.eval_constraint_jacobian(
+    oracle::_NonlinearOracle{ThreadedBackend},
+    J::AbstractVector{Float64},
+    x::AbstractVector{Float64},
+)
+    start = time()
+    Threads.@threads for offset in oracle.backend.offsets
+        for c in offset
+            func = oracle.constraints[c.index]
+            g = _eval_gradient(oracle, func, x)
+            for i in 1:length(g)
+                @inbounds J[c.∇f_offset+i-1] = g[i]
+            end
+        end
+    end
+    oracle.eval_constraint_jacobian_timer += time() - start
+    return
+end
+
+function MOI.eval_hessian_lagrangian(
+    oracle::_NonlinearOracle{ThreadedBackend},
+    H::AbstractVector{Float64},
+    x::AbstractVector{Float64},
+    σ::Float64,
+    μ::AbstractVector{Float64},
+)
+    start = time()
+    hessian_offset = 0
+    if oracle.objective !== nothing
+        h = _eval_hessian(oracle, oracle.objective, x)
+        for i in 1:length(h)
+            H[i] = σ * h[i]
+        end
+        hessian_offset += length(h)
+    end
+    Threads.@threads for offset in oracle.backend.offsets
+        for c in offset
+            func = oracle.constraints[c.index]
+            h = _eval_hessian(oracle, func, x)
+            for i in 1:length(h)
+                @inbounds H[c.∇²f_offset+i-1] = μ[c.index] * h[i]
+            end
+        end
+    end
+    oracle.eval_hessian_lagrangian_timer += time() - start
+    return
 end

@@ -26,12 +26,6 @@ constraints. So something like
 is great because we compute the derivative as `cos(x[i])` and then we can
 fill in the 10_000 derivative functions without having to do other calculus.
 
-There are a couple of options in the evaluation functions, each with their own
-performance tradeoffs. If we want to consider parallel evaluation, then we
-need to use the offsets to allow out-of-order execution. I've threaded on the
-hash of the symbolic constraints because constraints based on the same symbolic
-template share a temporary storage cache in the `_SymbolicsFunction`.
-
 ## Installation
 
 Install SymbolicAD as follows:
