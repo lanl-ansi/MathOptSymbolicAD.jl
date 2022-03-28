@@ -19,12 +19,15 @@ function runtests()
     return
 end
 
-function run_unit_benchmark(model::JuMP.Model)
+function run_unit_benchmark(model::JuMP.Model; direct_model::Bool = false)
     @info "Constructing oracles"
 
     @time d = JuMP.NLPEvaluator(model)
-    @time nlp_block =
+    @time nlp_block = if direct_model
+        SymbolicAD._nlp_block_data(model; backend = SymbolicAD.DefaultBackend())
+    else
         SymbolicAD._nlp_block_data(d; backend = SymbolicAD.DefaultBackend())
+    end
     oracle = nlp_block.evaluator
 
     @info "MOI.initialize"
@@ -253,7 +256,8 @@ end
 
 function test_case5_pjm_unit()
     model = power_model("pglib_opf_case5_pjm.m")
-    run_unit_benchmark(model)
+    run_unit_benchmark(model; direct_model = false)
+    run_unit_benchmark(model; direct_model = true)
     return
 end
 

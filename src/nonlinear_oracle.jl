@@ -156,11 +156,7 @@ mutable struct _NonlinearOracle{B} <: MOI.AbstractNLPEvaluator
     eval_constraint_timer::Float64
     eval_constraint_jacobian_timer::Float64
     eval_hessian_lagrangian_timer::Float64
-    function _NonlinearOracle(
-        backend::B,
-        objective,
-        constraints,
-    ) where {B}
+    function _NonlinearOracle(backend::B, objective, constraints) where {B}
         return new{B}(
             backend,
             objective,
