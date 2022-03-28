@@ -4,6 +4,7 @@ using JuMP
 
 import Ipopt
 import PowerModels
+import SparseArrays
 import SymbolicAD
 import Test
 
@@ -127,9 +128,15 @@ function run_unit_benchmark(model::JuMP.Model)
     # For the Hessian, we won't compute identical sparsity patterns due to
     # duplicates, etc. What we need to do is check the full sparse matrix.
 
+    function _to_sparse(IJ, V)
+        I, J = [i for (i, _) in IJ], [j for (_, j) in IJ]
+        n = max(maximum(I), maximum(J))
+        return SparseArrays.sparse(I, J, V, n, n)
+    end
+
     Test.@test isapprox(
-        SymbolicAD._to_sparse(H, H_nz),
-        SymbolicAD._to_sparse(H1, H_nz_1);
+        _to_sparse(H, H_nz),
+        _to_sparse(H1, H_nz_1);
         atol = 1e-6,
     )
     return
@@ -152,8 +159,10 @@ function run_solution_benchmark(model::JuMP.Model)
 
     serial_model = Ipopt.Optimizer()
     MOI.copy_to(serial_model, model)
-    serial_nlp_block =
-        SymbolicAD.nlp_block_data(JuMP.NLPEvaluator(model); use_threads = false)
+    serial_nlp_block = SymbolicAD.nlp_block_data(
+        JuMP.NLPEvaluator(model);
+        backend = SymbolicAD.DefaultBackend(),
+    )
     MOI.set(serial_model, MOI.NLPBlock(), serial_nlp_block)
     MOI.optimize!(serial_model)
     serial_solution = MOI.get(
@@ -166,8 +175,10 @@ function run_solution_benchmark(model::JuMP.Model)
 
     threaded_model = Ipopt.Optimizer()
     MOI.copy_to(threaded_model, model)
-    threaded_nlp_block =
-        SymbolicAD.nlp_block_data(JuMP.NLPEvaluator(model); use_threads = true)
+    threaded_nlp_block = SymbolicAD.nlp_block_data(
+        JuMP.NLPEvaluator(model);
+        backend = SymbolicAD.ThreadedBackend(),
+    )
     MOI.set(threaded_model, MOI.NLPBlock(), threaded_nlp_block)
     MOI.optimize!(threaded_model)
     threaded_solution = MOI.get(
