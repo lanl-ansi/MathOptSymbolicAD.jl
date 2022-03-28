@@ -156,6 +156,21 @@ mutable struct _NonlinearOracle{B} <: MOI.AbstractNLPEvaluator
     eval_constraint_timer::Float64
     eval_constraint_jacobian_timer::Float64
     eval_hessian_lagrangian_timer::Float64
+    function _NonlinearOracle(
+        backend::B,
+        objective,
+        constraints,
+    ) where {B}
+        return new{B}(
+            backend,
+            objective,
+            constraints,
+            Dict{UInt,_SymbolicsFunction}(),
+            0.0,
+            0.0,
+            0.0,
+        )
+    end
 end
 
 function MOI.initialize(
@@ -339,16 +354,16 @@ function MOI.eval_hessian_lagrangian(
 end
 
 """
-    nlp_block_data(
+    _nlp_block_data(
         d::MOI.AbstractNLPEvaluator;
-        backend::AbstractNonlinearOracleBackend = DefaultBackend(),
+        backend::AbstractNonlinearOracleBackend,
     )
 
 Convert an AbstractNLPEvaluator into a SymbolicAD instance of MOI.NLPBlockData.
 """
-function nlp_block_data(
+function _nlp_block_data(
     d::MOI.AbstractNLPEvaluator;
-    backend::AbstractNonlinearOracleBackend = DefaultBackend(),
+    backend::AbstractNonlinearOracleBackend,
 )
     MOI.initialize(d, [:ExprGraph])
     objective = d.has_nlobj ? _Function(MOI.objective_expr(d)) : nothing
@@ -359,15 +374,7 @@ function nlp_block_data(
         f, bound = _nonlinear_constraint(MOI.constraint_expr(d, i))
         functions[i], bounds[i] = f, bound
     end
-    oracle = _NonlinearOracle(
-        backend,
-        objective,
-        functions,
-        Dict{UInt,_SymbolicsFunction}(),
-        0.0,
-        0.0,
-        0.0,
-    )
+    oracle = _NonlinearOracle(backend, objective, functions)
     return MOI.NLPBlockData(bounds, oracle, d.has_nlobj)
 end
 
@@ -477,5 +484,79 @@ function MOI.eval_hessian_lagrangian(
         end
     end
     oracle.eval_hessian_lagrangian_timer += time() - start
+    return
+end
+
+###
+### JuMP integration
+###
+
+function _to_expr(
+    nlp_data::JuMP._NLPData,
+    data::JuMP._NonlinearExprData,
+    subexpressions::Vector{Expr},
+)
+    tree = Any[]
+    for node in data.nd
+        expr = if node.nodetype == JuMP._Derivatives.CALL
+            Expr(:call, JuMP._Derivatives.operators[node.index])
+        elseif node.nodetype == JuMP._Derivatives.CALLUNIVAR
+            Expr(:call, JuMP._Derivatives.univariate_operators[node.index])
+        elseif node.nodetype == JuMP._Derivatives.SUBEXPRESSION
+            subexpressions[node.index]
+        elseif node.nodetype == JuMP._Derivatives.MOIVARIABLE
+            MOI.VariableIndex(node.index)
+        elseif node.nodetype == JuMP._Derivatives.PARAMETER
+            nlp_data.nlparamvalues[node.index]
+        else
+            @assert node.nodetype == JuMP._Derivatives.VALUE
+            data.const_values[node.index]
+        end
+        if 1 <= node.parent <= length(tree)
+            push!(tree[node.parent].args, expr)
+        end
+        push!(tree, expr)
+    end
+    return tree[1]
+end
+
+_to_expr(::JuMP._NLPData, ::Nothing, ::Vector{Expr}) = nothing
+
+function _nlp_block_data(
+    model::JuMP.Model;
+    backend::AbstractNonlinearOracleBackend,
+)
+    return _nlp_block_data(model.nlp_data; backend = backend)
+end
+
+function _nlp_block_data(
+    nlp_data::JuMP._NLPData;
+    backend::AbstractNonlinearOracleBackend,
+)
+    subexpressions = map(nlp_data.nlexpr) do expr
+        return _to_expr(nlp_data, expr, Expr[])::Expr
+    end
+    nlobj = _to_expr(nlp_data, nlp_data.nlobj, subexpressions)
+    objective = nlobj === nothing ? nothing : _Function(nlobj)
+    functions = map(nlp_data.nlconstr) do c
+        return _Function(_to_expr(nlp_data, c.terms, subexpressions))
+    end
+    return MOI.NLPBlockData(
+        [MOI.NLPBoundsPair(c.lb, c.ub) for c in nlp_data.nlconstr],
+        _NonlinearOracle(backend, objective, functions),
+        objective !== nothing,
+    )
+end
+
+function optimize_hook(
+    model::JuMP.Model;
+    backend::AbstractNonlinearOracleBackend = DefaultBackend(),
+)
+    nlp_block = _nlp_block_data(model; backend = backend)
+    nlp_data = model.nlp_data
+    model.nlp_data = nothing
+    MOI.set(model, MOI.NLPBlock(), nlp_block)
+    JuMP.optimize!(model; ignore_optimize_hook = true)
+    model.nlp_data = nlp_data
     return
 end

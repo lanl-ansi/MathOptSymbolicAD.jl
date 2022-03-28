@@ -36,9 +36,23 @@ Pkg.add("https://github.com/odow/SymbolicAD.jl)
 
 ## Use with JuMP
 
+There are two ways to use SymbolicAD with JuMP.
+
+First, you can use `SymbolicAD.Optimizer`:
 ```julia
 using JuMP
 import Ipopt
 import SymbolicAD
 model = Model(() -> SymbolicAD.Optimizer(Ipopt.Optimizer))
 ```
+
+Second, you can set an `SymbolicAD.optimizer_hook`:
+```julia
+using JuMP
+import Ipopt
+import SymbolicAD
+model = Model(Ipopt.Optimizer)
+set_optimizer_hook(model, SymbolicAD.optimizer_hook)
+```
+
+In general, the `SymbolicAD.optimizer_hook` approach should be faster.

@@ -1,6 +1,7 @@
 module SymbolicAD
 
 import Base.Meta: isexpr
+import JuMP
 import MathOptInterface
 import SparseArrays
 import Symbolics
