@@ -243,7 +243,7 @@ function MOI.eval_objective_gradient(
     ∇f = _eval_gradient(oracle, oracle.objective, x)
     fill!(g, 0.0)
     for (k, v) in oracle.objective.variables
-        g[k.value] = ∇f[v]
+        @inbounds g[k.value] = ∇f[v]
     end
     return
 end
@@ -254,8 +254,8 @@ function MOI.eval_constraint(
     x::AbstractVector{Float64},
 )
     start = time()
-    for row in 1:length(g)
-        g[row] = _eval_function(oracle, oracle.constraints[row], x)
+    for (row, c) in enumerate(oracle.constraints)
+        g[row] = _eval_function(oracle, c, x)
     end
     oracle.eval_constraint_timer += time() - start
     return
@@ -263,8 +263,7 @@ end
 
 function MOI.jacobian_structure(oracle::_NonlinearOracle)
     structure = Tuple{Int,Int}[]
-    for row in 1:length(oracle.constraints)
-        c = oracle.constraints[row]
+    for (row, c) in enumerate(oracle.constraints)
         for x in sort(collect(keys(c.variables)); by = v -> c.variables[v])
             push!(structure, (row, x.value))
         end
@@ -279,8 +278,8 @@ function MOI.eval_constraint_jacobian(
 )
     start = time()
     k = 1
-    for i in 1:length(oracle.constraints)
-        g = _eval_gradient(oracle, oracle.constraints[i], x)
+    for c in oracle.constraints
+        g = _eval_gradient(oracle, c, x)
         for gi in g
             J[k] = gi
             k += 1
@@ -322,16 +321,16 @@ function MOI.eval_hessian_lagrangian(
     hessian_offset = 0
     if oracle.objective !== nothing
         h = _eval_hessian(oracle, oracle.objective, x)
-        for i in 1:length(h)
-            H[i] = σ * h[i]
+        for (i, hi) in enumerate(h)
+            @inbounds H[i] = σ * hi
         end
         hessian_offset += length(h)
     end
     k = hessian_offset + 1
-    for i in 1:length(oracle.constraints)
-        h = _eval_hessian(oracle, oracle.constraints[i], x)
+    for (μi, constraint) in zip(μ, oracle.constraints)
+        h = _eval_hessian(oracle, constraint, x)
         for nzval in h
-            H[k] = μ[i] * nzval
+            @inbounds H[k] = μi * nzval
             k += 1
         end
     end
@@ -358,8 +357,7 @@ function nlp_block_data(
     bounds = Vector{MOI.NLPBoundsPair}(undef, n)
     for i in 1:n
         f, bound = _nonlinear_constraint(MOI.constraint_expr(d, i))
-        functions[i] = f
-        bounds[i] = bound
+        functions[i], bounds[i] = f, bound
     end
     oracle = _NonlinearOracle(
         backend,
@@ -403,7 +401,10 @@ function MOI.initialize(
     )
     index, ∇f_offset, ∇²f_offset = 1, 1, obj_hess_offset + 1
     for f in oracle.constraints
-        push!(offsets[f.expr.hash], _ConstraintOffset(index, ∇f_offset, ∇²f_offset))
+        push!(
+            offsets[f.expr.hash],
+            _ConstraintOffset(index, ∇f_offset, ∇²f_offset),
+        )
         index += 1
         symbolic_function = oracle.symbolic_functions[f.expr.hash]
         ∇f_offset += length(symbolic_function.g)
