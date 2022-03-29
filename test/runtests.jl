@@ -19,11 +19,15 @@ function runtests()
     return
 end
 
-function run_unit_benchmark(model::JuMP.Model)
+function run_unit_benchmark(model::JuMP.Model; direct_model::Bool = false)
     @info "Constructing oracles"
 
     @time d = JuMP.NLPEvaluator(model)
-    @time nlp_block = SymbolicAD.nlp_block_data(d)
+    @time nlp_block = if direct_model
+        SymbolicAD._nlp_block_data(model; backend = SymbolicAD.DefaultBackend())
+    else
+        SymbolicAD._nlp_block_data(d; backend = SymbolicAD.DefaultBackend())
+    end
     oracle = nlp_block.evaluator
 
     @info "MOI.initialize"
@@ -159,7 +163,7 @@ function run_solution_benchmark(model::JuMP.Model)
 
     serial_model = Ipopt.Optimizer()
     MOI.copy_to(serial_model, model)
-    serial_nlp_block = SymbolicAD.nlp_block_data(
+    serial_nlp_block = SymbolicAD._nlp_block_data(
         JuMP.NLPEvaluator(model);
         backend = SymbolicAD.DefaultBackend(),
     )
@@ -175,7 +179,7 @@ function run_solution_benchmark(model::JuMP.Model)
 
     threaded_model = Ipopt.Optimizer()
     MOI.copy_to(threaded_model, model)
-    threaded_nlp_block = SymbolicAD.nlp_block_data(
+    threaded_nlp_block = SymbolicAD._nlp_block_data(
         JuMP.NLPEvaluator(model);
         backend = SymbolicAD.ThreadedBackend(),
     )
@@ -252,7 +256,8 @@ end
 
 function test_case5_pjm_unit()
     model = power_model("pglib_opf_case5_pjm.m")
-    run_unit_benchmark(model)
+    run_unit_benchmark(model; direct_model = false)
+    run_unit_benchmark(model; direct_model = true)
     return
 end
 
@@ -309,6 +314,38 @@ function test_optimizer_case5_pjm()
     set_optimizer(model, Ipopt.Optimizer)
     optimize!(model)
     Test.@test isapprox(objective_value(model), symbolic_obj, atol = 1e-6)
+    return
+end
+
+function test_optimizer_case5_pjm_optimize_hook()
+    model = power_model("pglib_opf_case5_pjm.m")
+    set_optimizer(model, Ipopt.Optimizer)
+    set_optimize_hook(model, SymbolicAD.optimize_hook)
+    optimize!(model)
+    symbolic_obj = objective_value(model)
+    set_optimize_hook(model, nothing)
+    optimize!(model)
+    Test.@test isapprox(objective_value(model), symbolic_obj, atol = 1e-6)
+    return
+end
+
+"""
+    test_optimize_hook()
+
+This model is chosen to have a number of unique features that cover the range of
+node types in JuMP's nonlinear expression data structure.
+"""
+function test_optimize_hook()
+    model = Model(Ipopt.Optimizer)
+    @variable(model, 0 <= x <= 2π, start = π)
+    @NLexpression(model, y, sin(x))
+    @NLparameter(model, p == 1)
+    @NLconstraint(model, sqrt(y + 2) <= p + 1)
+    @NLobjective(model, Min, p * y)
+    set_optimize_hook(model, SymbolicAD.optimize_hook)
+    optimize!(model)
+    Test.@test isapprox(objective_value(model), -1; atol = 1e-6)
+    Test.@test isapprox(value(x), 1.5 * π; atol = 1e-6)
     return
 end
 

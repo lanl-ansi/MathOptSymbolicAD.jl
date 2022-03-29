@@ -1,16 +1,22 @@
 struct Optimizer{O} <: MOI.AbstractOptimizer
-    use_threads::Bool
+    backend::AbstractNonlinearOracleBackend
     inner::O
-    function Optimizer(inner; use_threads::Bool = false)
+    function Optimizer(
+        inner;
+        backend::AbstractNonlinearOracleBackend = DefaultBackend(),
+    )
         model = MOI.instantiate(inner)
-        return new{typeof(model)}(use_threads, model)
+        return new{typeof(model)}(backend, model)
     end
 end
 
 function MOI.set(model::Optimizer, ::MOI.NLPBlock, value)
     @info("Replacing NLPBlock with the SymbolicAD one")
-    nlp_block = SymbolicAD.nlp_block_data(value.evaluator)
-    MOI.set(model.inner, MOI.NLPBlock(), nlp_block)
+    MOI.set(
+        model.inner,
+        MOI.NLPBlock(),
+        _nlp_block_data(value.evaluator; backend = model.backend),
+    )
     return
 end
 
