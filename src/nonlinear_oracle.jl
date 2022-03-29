@@ -153,6 +153,8 @@ mutable struct _NonlinearOracle{B} <: MOI.AbstractNLPEvaluator
     objective::Union{Nothing,_Function}
     constraints::Vector{_Function}
     symbolic_functions::Dict{UInt,_SymbolicsFunction}
+    eval_objective_timer::Float64
+    eval_objective_gradient_timer::Float64
     eval_constraint_timer::Float64
     eval_constraint_jacobian_timer::Float64
     eval_hessian_lagrangian_timer::Float64
@@ -162,6 +164,8 @@ mutable struct _NonlinearOracle{B} <: MOI.AbstractNLPEvaluator
             objective,
             constraints,
             Dict{UInt,_SymbolicsFunction}(),
+            0.0,
+            0.0,
             0.0,
             0.0,
             0.0,
@@ -241,8 +245,11 @@ function MOI.eval_objective(
     oracle::_NonlinearOracle,
     x::AbstractVector{Float64},
 )
+    start = time()
     @assert oracle.objective !== nothing
-    return _eval_function(oracle, oracle.objective, x)
+    objective_value = _eval_function(oracle, oracle.objective, x)
+    oracle.eval_objective_timer += time() - start
+    return objective_value
 end
 
 function MOI.eval_objective_gradient(
@@ -250,12 +257,14 @@ function MOI.eval_objective_gradient(
     g::AbstractVector{Float64},
     x::AbstractVector{Float64},
 )
+    start = time()
     @assert oracle.objective !== nothing
     ∇f = _eval_gradient(oracle, oracle.objective, x)
     fill!(g, 0.0)
     for (k, v) in oracle.objective.variables
         @inbounds g[k.value] = ∇f[v]
     end
+    oracle.eval_objective_gradient_timer += time() - start
     return
 end
 
