@@ -51,8 +51,22 @@ end
 
 function _Node(f::_Function, expr::Expr)
     if isexpr(expr, :call)
-        nodes = [_Node(f, expr.args[i]) for i in 2:length(expr.args)]
-        return _Node(f, expr.args[1], nodes...)
+        # Performance optimization: most calls will be unary or binary
+        # operators. Therefore, we can specialize an if-statement to handle the
+        # common cases without needing to splat.
+        if length(expr.args) == 2
+            return _Node(f, expr.args[1], _Node(f, expr.args[2]))
+        elseif length(expr.args) == 3
+            return _Node(
+                f,
+                expr.args[1],
+                _Node(f, expr.args[2]),
+                _Node(f, expr.args[3]),
+            )
+        else
+            nodes = (_Node(f, expr.args[i]) for i in 2:length(expr.args))
+            return _Node(f, expr.args[1], nodes...)
+        end
     else
         @assert isexpr(expr, :ref)
         @assert expr.args[1] == :x
