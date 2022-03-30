@@ -380,9 +380,10 @@ function MOI.eval_hessian_lagrangian(
     σ::Float64,
     μ::AbstractVector{Float64},
 )
+    fill!(H, 0.0)
     start = time()
     hessian_offset = 0
-    if oracle.objective !== nothing
+    if oracle.objective !== nothing && !iszero(σ)
         h = _eval_hessian(oracle, oracle.objective, x)
         for (i, hi) in enumerate(h)
             @inbounds H[i] = σ * hi
@@ -391,6 +392,9 @@ function MOI.eval_hessian_lagrangian(
     end
     k = hessian_offset + 1
     for (μi, constraint) in zip(μ, oracle.constraints)
+        if iszero(μi)
+            continue
+        end
         h = _eval_hessian(oracle, constraint, x)
         for nzval in h
             @inbounds H[k] = μi * nzval
@@ -513,9 +517,10 @@ function MOI.eval_hessian_lagrangian(
     σ::Float64,
     μ::AbstractVector{Float64},
 )
+    fill!(H, 0.0)
     start = time()
     hessian_offset = 0
-    if oracle.objective !== nothing
+    if oracle.objective !== nothing && !iszero(σ)
         h = _eval_hessian(oracle, oracle.objective, x)
         for i in 1:length(h)
             H[i] = σ * h[i]
@@ -524,6 +529,9 @@ function MOI.eval_hessian_lagrangian(
     end
     Threads.@threads for offset in oracle.backend.offsets
         for c in offset
+            if iszero(μ[c.index])
+                continue
+            end
             func = oracle.constraints[c.index]
             h = _eval_hessian(oracle, func, x)
             for i in 1:length(h)
