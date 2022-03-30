@@ -26,7 +26,8 @@ struct _Node
         )
     end
     function _Node(f::_AbstractFunction, variable::MOI.VariableIndex)
-        index = get!(f.variables, variable, length(f.variables) + 1)
+        lookup = f.variables::Dict{MOI.VariableIndex,Int}
+        index = get!(lookup, variable, length(lookup) + 1)
         return new(_OP_VARIABLE, hash(_OP_VARIABLE), index, :NONE, nothing)
     end
     function _Node(::_AbstractFunction, operation::Symbol, children::_Node...)
@@ -49,11 +50,11 @@ _hash(a::_Node, args::_Node...) = hash(a.hash, _hash(args...))
 _hash(child::_Node) = child.hash
 
 mutable struct _Function <: _AbstractFunction
-    variables::Dict{MOI.VariableIndex,Int}
+    ordered_variables::Vector{Int}
     coefficients::Vector{Float64}
     data::Vector{Float64}
     expr::_Node
-    ordered_variables::Vector{Int}
+    variables::Union{Nothing,Dict{MOI.VariableIndex,Int}}
     function _Function(expr::Expr)
         f = new()
         f.variables = Dict{MOI.VariableIndex,Int}()
@@ -64,7 +65,7 @@ mutable struct _Function <: _AbstractFunction
         for (k, v) in f.variables
             f.ordered_variables[v] = k.value
         end
-        empty!(f.variables)
+        f.variables = nothing
         return f
     end
 end
