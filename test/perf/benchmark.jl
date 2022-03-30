@@ -5,7 +5,7 @@ import SymbolicAD
 
 function power_model(case::String)
     pm = PowerModels.instantiate_model(
-        joinpath(@__DIR__, "data", case),
+        joinpath(dirname(@__DIR__), "data", case),
         PowerModels.ACPPowerModel,
         PowerModels.build_opf,
     )
