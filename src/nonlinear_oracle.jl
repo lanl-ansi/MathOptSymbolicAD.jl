@@ -26,7 +26,8 @@ struct _Node
         )
     end
     function _Node(f::_AbstractFunction, variable::MOI.VariableIndex)
-        index = get!(f.variables, variable, length(f.variables) + 1)
+        lookup = f.variables::Dict{MOI.VariableIndex,Int}
+        index = get!(lookup, variable, length(lookup) + 1)
         return new(_OP_VARIABLE, hash(_OP_VARIABLE), index, :NONE, nothing)
     end
     function _Node(::_AbstractFunction, operation::Symbol, children::_Node...)
@@ -49,16 +50,22 @@ _hash(a::_Node, args::_Node...) = hash(a.hash, _hash(args...))
 _hash(child::_Node) = child.hash
 
 mutable struct _Function <: _AbstractFunction
-    variables::Dict{MOI.VariableIndex,Int}
+    ordered_variables::Vector{Int}
     coefficients::Vector{Float64}
     data::Vector{Float64}
     expr::_Node
+    variables::Union{Nothing,Dict{MOI.VariableIndex,Int}}
     function _Function(expr::Expr)
         f = new()
         f.variables = Dict{MOI.VariableIndex,Int}()
         f.data = Float64[]
         f.expr = _Node(f, expr)
         f.coefficients = zeros(length(f.variables))
+        f.ordered_variables = zeros(Int, length(f.variables))
+        for (k, v) in f.variables
+            f.ordered_variables[v] = k.value
+        end
+        f.variables = nothing
         return f
     end
 end
@@ -137,7 +144,7 @@ struct _SymbolicsFunction{F,G,H}
 end
 
 function _SymbolicsFunction(f::_Function, features::Vector{Symbol})
-    d, n = length(f.data), length(f.variables)
+    d, n = length(f.data), length(f.ordered_variables)
     Symbolics.@variables(p[1:d], x[1:n])
     p, x = collect(p), collect(x)
     f_expr = _expr_to_symbolics(f.expr, p, x)
@@ -239,14 +246,19 @@ end
 
 MOI.features_available(::_NonlinearOracle) = [:Grad, :Jac, :Hess]
 
+function _update_coefficients(f::_Function, x::AbstractVector{Float64})
+    for (i, v) in enumerate(f.ordered_variables)
+        @inbounds f.coefficients[i] = x[v]
+    end
+    return
+end
+
 function _eval_function(
     oracle::_NonlinearOracle,
     func::_Function,
     x::AbstractVector{Float64},
 )
-    for (v, index) in func.variables
-        @inbounds func.coefficients[index] = x[v.value]
-    end
+    _update_coefficients(func, x)
     @inbounds f = oracle.symbolic_functions[func.expr.hash]
     return f.f(func.data, func.coefficients)::Float64
 end
@@ -256,9 +268,7 @@ function _eval_gradient(
     func::_Function,
     x::AbstractVector{Float64},
 )
-    for (v, index) in func.variables
-        @inbounds func.coefficients[index] = x[v.value]
-    end
+    _update_coefficients(func, x)
     @inbounds f = oracle.symbolic_functions[func.expr.hash]
     f.∇f(f.g, func.data, func.coefficients)
     return f.g
@@ -269,9 +279,7 @@ function _eval_hessian(
     func::_Function,
     x::AbstractVector{Float64},
 )
-    for (v, index) in func.variables
-        @inbounds func.coefficients[index] = x[v.value]
-    end
+    _update_coefficients(func, x)
     @inbounds f = oracle.symbolic_functions[func.expr.hash]
     f.∇²f(f.H, func.data, func.coefficients)
     return f.H
@@ -297,8 +305,8 @@ function MOI.eval_objective_gradient(
     @assert oracle.objective !== nothing
     ∇f = _eval_gradient(oracle, oracle.objective, x)
     fill!(g, 0.0)
-    for (k, v) in oracle.objective.variables
-        @inbounds g[k.value] = ∇f[v]
+    for (i, v) in enumerate(oracle.objective.ordered_variables)
+        @inbounds g[v] = ∇f[i]
     end
     oracle.eval_objective_gradient_timer += time() - start
     return
@@ -320,8 +328,8 @@ end
 function MOI.jacobian_structure(oracle::_NonlinearOracle)
     structure = Tuple{Int,Int}[]
     for (row, c) in enumerate(oracle.constraints)
-        for x in sort(collect(keys(c.variables)); by = v -> c.variables[v])
-            push!(structure, (row, x.value))
+        for col in c.ordered_variables
+            push!(structure, (row, col))
         end
     end
     return structure
@@ -349,9 +357,8 @@ _hessian_lagrangian_structure(::Any, ::Any, ::Nothing) = nothing
 
 function _hessian_lagrangian_structure(structure, oracle, c)
     f = oracle.symbolic_functions[c.expr.hash]
-    H_to_x = Dict(v => k.value for (k, v) in c.variables)
     for (i, j) in f.H_structure
-        row, col = H_to_x[i], H_to_x[j]
+        row, col = c.ordered_variables[i], c.ordered_variables[j]
         push!(structure, row >= col ? (row, col) : (col, row))
     end
     return
