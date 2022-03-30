@@ -1,4 +1,10 @@
-@enum(_Operation, _OP_COEFFICIENT, _OP_VARIABLE, _OP_OPERATION,)
+@enum(
+    _Operation,
+    _OP_COEFFICIENT,
+    _OP_VARIABLE,
+    _OP_OPERATION,
+    _OP_INTEGER_EXPONENT,
+)
 
 abstract type _AbstractFunction end
 
@@ -11,11 +17,10 @@ struct _Node
 
     function _Node(f::_AbstractFunction, coefficient::Float64)
         push!(f.data, coefficient)
-        index = length(f.data)
         return new(
             _OP_COEFFICIENT,
             hash(_OP_COEFFICIENT),
-            index,
+            length(f.data),
             :NONE,
             nothing,
         )
@@ -26,9 +31,18 @@ struct _Node
     end
     function _Node(::_AbstractFunction, operation::Symbol, children::_Node...)
         h = hash(operation, _hash(children...))
-        return new(_OP_OPERATION, h, UInt(0), operation, collect(children))
+        return new(_OP_OPERATION, h, 0, operation, collect(children))
+    end
+    # Special cased performance optimization: x^N where N::Int is a common
+    # operation that would otherwise get re-written to x[i]^p[j]. Doing so
+    # disables a lot of potential optimizations, so it's worth special-casing
+    # this. Other operations aren't as important.
+    function _Node(::_AbstractFunction, ::typeof(^), x::_Node, N::Int)
+        return new(_OP_INTEGER_EXPONENT, hash(^, _hash(x, N)), N, :^, [x])
     end
 end
+
+_hash(a::_Node, N::Int) = hash(a.hash, hash(N))
 
 _hash(a::_Node, args::_Node...) = hash(a.hash, _hash(args...))
 
@@ -49,6 +63,9 @@ mutable struct _Function <: _AbstractFunction
     end
 end
 
+_is_integer(::Any) = false
+_is_integer(x::Real) = Base.isinteger(x)
+
 function _Node(f::_Function, expr::Expr)
     if isexpr(expr, :call)
         # Performance optimization: most calls will be unary or binary
@@ -57,6 +74,10 @@ function _Node(f::_Function, expr::Expr)
         if length(expr.args) == 2
             return _Node(f, expr.args[1], _Node(f, expr.args[2]))
         elseif length(expr.args) == 3
+            # Special cased performance optimization for _OP_INTEGER_EXPONENT
+            if expr.args[1] == :^ && _is_integer(expr.args[3])
+                return _Node(f, ^, _Node(f, expr.args[2]), Int(expr.args[3]))
+            end
             return _Node(
                 f,
                 expr.args[1],
@@ -79,11 +100,12 @@ function _expr_to_symbolics(expr::_Node, p, x)
         return p[expr.index]
     elseif expr.head == _OP_VARIABLE
         return x[expr.index]
-    else
-        @assert expr.head == _OP_OPERATION
-        args = [_expr_to_symbolics(c, p, x) for c in expr.children]
+    elseif expr.head == _OP_OPERATION
         f = getfield(Base, expr.operation)
-        return f(args...)
+        return f((_expr_to_symbolics(c, p, x) for c in expr.children)...)
+    else
+        @assert expr.head == _OP_INTEGER_EXPONENT
+        return _expr_to_symbolics(expr.children[1], p, x)^expr.index
     end
 end
 
