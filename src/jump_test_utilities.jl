@@ -156,7 +156,7 @@ function run_unit_benchmark(
 end
 
 """
-    run_solution_benchmark(model::JuMP.Model, optimizer)
+    run_solution_benchmark(model::JuMP.Model, optimizer; atol = 1e-6)
 
 Given a JuMP Model `model`, solve the problem using JuMP's built-in AD, as well
 as the `DefaultBackend` and `ThreadedBackend` of SymbolicAD and check that they
@@ -164,7 +164,12 @@ find the same solutions.
 
 `optimizer` must be something that can be passed to `MOI.instantiate`.
 """
-function run_solution_benchmark(model::JuMP.Model, optimizer)
+function run_solution_benchmark(
+    model::JuMP.Model,
+    optimizer;
+    atol::Float64 = 1e-6,
+    rtol::Float64 = 0.0,
+)
     @info "Solving with JuMP"
 
     jump_model = MOI.instantiate(optimizer)
@@ -181,10 +186,8 @@ function run_solution_benchmark(model::JuMP.Model, optimizer)
 
     serial_model = MOI.instantiate(optimizer)
     MOI.copy_to(serial_model, model)
-    serial_nlp_block = _nlp_block_data(
-        JuMP.NLPEvaluator(model);
-        backend = DefaultBackend(),
-    )
+    serial_nlp_block =
+        _nlp_block_data(JuMP.NLPEvaluator(model); backend = DefaultBackend())
     MOI.set(serial_model, MOI.NLPBlock(), serial_nlp_block)
     MOI.optimize!(serial_model)
     serial_solution = MOI.get(
@@ -197,10 +200,8 @@ function run_solution_benchmark(model::JuMP.Model, optimizer)
 
     threaded_model = MOI.instantiate(optimizer)
     MOI.copy_to(threaded_model, model)
-    threaded_nlp_block = _nlp_block_data(
-        JuMP.NLPEvaluator(model);
-        backend = ThreadedBackend(),
-    )
+    threaded_nlp_block =
+        _nlp_block_data(JuMP.NLPEvaluator(model); backend = ThreadedBackend())
     MOI.set(threaded_model, MOI.NLPBlock(), threaded_nlp_block)
     MOI.optimize!(threaded_model)
     threaded_solution = MOI.get(
@@ -210,9 +211,9 @@ function run_solution_benchmark(model::JuMP.Model, optimizer)
     )
 
     @info "Validating solutions"
-
-    Test.@test isapprox(jump_solution, serial_solution; atol = 1e-6)
-    Test.@test isapprox(jump_solution, threaded_solution; atol = 1e-6)
+    println("Errors = ", extrema(jump_solution .- serial_solution))
+    Test.@test ≈(jump_solution, serial_solution; atol = atol, rtol = rtol)
+    Test.@test ≈(jump_solution, threaded_solution; atol = atol, rtol = rtol)
 
     @info "Timing statistics"
 
