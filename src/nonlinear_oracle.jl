@@ -393,7 +393,14 @@ function MOI.hessian_lagrangian_structure(oracle::_NonlinearOracle)
     for c in oracle.constraints
         _hessian_lagrangian_structure(structure, oracle, map, c)
     end
-    return structure
+    # As another performance improvement, sort the hessian structure into column
+    # major order. This should help Ipopt and the linear solver.
+    p = sortperm(structure)
+    pinv = invperm(p)
+    for (i, h) in enumerate(oracle.hessian_sparsity_map)
+        oracle.hessian_sparsity_map[i] = pinv[h]
+    end
+    return structure[p]
 end
 
 function MOI.eval_hessian_lagrangian(
