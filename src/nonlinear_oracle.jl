@@ -196,6 +196,7 @@ mutable struct _NonlinearOracle{B} <: MOI.AbstractNLPEvaluator
     objective::Union{Nothing,_Function}
     constraints::Vector{_Function}
     symbolic_functions::Dict{UInt,_SymbolicsFunction}
+    hessian_sparsity_map::Vector{Int}
     eval_objective_timer::Float64
     eval_objective_gradient_timer::Float64
     eval_constraint_timer::Float64
@@ -207,6 +208,7 @@ mutable struct _NonlinearOracle{B} <: MOI.AbstractNLPEvaluator
             objective,
             constraints,
             Dict{UInt,_SymbolicsFunction}(),
+            Int[],
             0.0,
             0.0,
             0.0,
@@ -353,22 +355,43 @@ function MOI.eval_constraint_jacobian(
     return
 end
 
-_hessian_lagrangian_structure(::Any, ::Any, ::Nothing) = nothing
+function _hessian_lagrangian_structure(
+    ::Vector{Tuple{Int,Int}},
+    ::_NonlinearOracle,
+    ::Any,
+    ::Nothing,
+)
+    return
+end
 
-function _hessian_lagrangian_structure(structure, oracle, c)
+function _hessian_lagrangian_structure(
+    structure::Vector{Tuple{Int,Int}},
+    oracle::_NonlinearOracle,
+    map::Dict{Tuple{Int,Int},Int},
+    c::_Function,
+)
     f = oracle.symbolic_functions[c.expr.hash]
     for (i, j) in f.H_structure
         row, col = c.ordered_variables[i], c.ordered_variables[j]
-        push!(structure, row >= col ? (row, col) : (col, row))
+        row_col = row >= col ? (row, col) : (col, row)
+        index = get(map, row_col, nothing)
+        if index === nothing
+            push!(structure, row_col)
+            map[row_col] = length(structure)
+            push!(oracle.hessian_sparsity_map, length(structure))
+        else
+            push!(oracle.hessian_sparsity_map, index::Int)
+        end
     end
     return
 end
 
 function MOI.hessian_lagrangian_structure(oracle::_NonlinearOracle)
     structure = Tuple{Int,Int}[]
-    _hessian_lagrangian_structure(structure, oracle, oracle.objective)
+    map = Dict{Tuple{Int,Int},Int}()
+    _hessian_lagrangian_structure(structure, oracle, map, oracle.objective)
     for c in oracle.constraints
-        _hessian_lagrangian_structure(structure, oracle, c)
+        _hessian_lagrangian_structure(structure, oracle, map, c)
     end
     return structure
 end
@@ -382,22 +405,21 @@ function MOI.eval_hessian_lagrangian(
 )
     fill!(H, 0.0)
     start = time()
-    hessian_offset = 0
+    k = 1
     if oracle.objective !== nothing && !iszero(σ)
         h = _eval_hessian(oracle, oracle.objective, x)
         for (i, hi) in enumerate(h)
-            @inbounds H[i] = σ * hi
+            @inbounds H[oracle.hessian_sparsity_map[i]] += σ * hi
         end
-        hessian_offset += length(h)
+        k += length(h)
     end
-    k = hessian_offset + 1
     for (μi, constraint) in zip(μ, oracle.constraints)
         if iszero(μi)
             continue
         end
         h = _eval_hessian(oracle, constraint, x)
         for nzval in h
-            @inbounds H[k] = μi * nzval
+            @inbounds H[oracle.hessian_sparsity_map[k]] += μi * nzval
             k += 1
         end
     end
@@ -507,6 +529,20 @@ function MOI.eval_constraint_jacobian(
         end
     end
     oracle.eval_constraint_jacobian_timer += time() - start
+    return
+end
+
+function _hessian_lagrangian_structure(
+    structure::Vector{Tuple{Int,Int}},
+    oracle::_NonlinearOracle{ThreadedBackend},
+    ::Dict{Tuple{Int,Int},Int},
+    c::_Function,
+)
+    f = oracle.symbolic_functions[c.expr.hash]
+    for (i, j) in f.H_structure
+        row, col = c.ordered_variables[i], c.ordered_variables[j]
+        push!(structure, row >= col ? (row, col) : (col, row))
+    end
     return
 end
 
