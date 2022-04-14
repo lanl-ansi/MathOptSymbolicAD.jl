@@ -506,7 +506,6 @@ function MOI.eval_hessian_lagrangian(
     return
 end
 
-
 function _nonlinear_constraint(expr::Expr)
     lower, upper, body = -Inf, Inf, :()
     if isexpr(expr, :call, 3)
