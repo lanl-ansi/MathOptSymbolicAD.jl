@@ -2,29 +2,8 @@
 
 **This is package is an experimental work-in-progress. Use at your own risk.**
 
-This package contains some experiments with symbolic differentiation of JuMP
-models. It is inspired by some work on
-[coin-or/gravity](https://github.com/coin-or/Gravity), which made the following
-observations:
-
- * Symbolic differentiation is slow
- * Most NLP's have a lot of structure
- * We can ask the user to provide structure in "template constraints" where
-   they give the symbolic form of the constraint and then provide a set of
-   data to convert from a symbolic form to the numerical form.
- * If we did symbolic differentiation on the symbolic form of the
-   constraint, we'd have a symbolic derivative we could plug the data in to
-   get the numerical derivative of each function
- * We don't have to ask the user to provide structure, we can infer it by
-   looking at the expression tree of each constraint.
-
-Hopefully, this should be very fast if the problem is large with few unique
-constraints. So something like
-```julia
-@NLconstraint(model, [i=1:10_000], sin(x[i]) <= 1)
-```
-is great because we compute the derivative as `cos(x[i])` and then we can
-fill in the 10_000 derivative functions without having to do other calculus.
+This package implements an experimental symbolic automatic differentiation
+backend for JuMP.
 
 ## Installation
 
@@ -38,15 +17,7 @@ Pkg.add("https://github.com/odow/SymbolicAD.jl)
 
 There are two ways to use SymbolicAD with JuMP.
 
-First, you can use `SymbolicAD.Optimizer`:
-```julia
-using JuMP
-import Ipopt
-import SymbolicAD
-model = Model(() -> SymbolicAD.Optimizer(Ipopt.Optimizer))
-```
-
-Second, you can set an `SymbolicAD.optimizer_hook`:
+Set an `SymbolicAD.optimizer_hook`:
 ```julia
 using JuMP
 import Ipopt
@@ -55,4 +26,53 @@ model = Model(Ipopt.Optimizer)
 set_optimizer_hook(model, SymbolicAD.optimizer_hook)
 ```
 
+Use `SymbolicAD.Optimizer`:
+```julia
+using JuMP
+import Ipopt
+import SymbolicAD
+model = Model(() -> SymbolicAD.Optimizer(Ipopt.Optimizer))
+```
+
 In general, the `SymbolicAD.optimizer_hook` approach should be faster.
+
+## Background
+
+`SymbolicAD` is inspired by Hassan Hijazi's work on
+[coin-or/gravity](https://github.com/coin-or/Gravity), a high-performance
+algebraic modeling language in C++.
+
+Hassan made the following observations:
+
+ * For large scale models, symbolic differentiation is slower than other
+   automatic differentiation techniques.
+ * However, most large-scale nonlinear programs have a lot of structure.
+ * Gravity asks the user to provide structure in the form of
+   _template constraints_, where the user gives the symbolic form of the
+   constraint as well as a set of data to convert from a symbolic form to the
+   numerical form.
+ * Instead of differentiating each constraint in its numerical form, we can
+   compute one symbolic derivative of the constraint in symbolic form, and then
+   plug in the data in to get the numerical derivative of each function.
+ * As a final step, if users don't provide the structure, we can still infer it
+   --perhaps with less accuracy--by comparing the expression tree of each
+   constraint.
+
+The symbolic differentiation approach of Gravity works well when the problem is
+large with few unique constraints. For example, a model like:
+```julia
+model = Model()
+@variable(model, 0 <= x[1:10_000] <= 1)
+@NLconstraint(model, [i=1:10_000], sin(x[i]) <= 1)
+@objective(model, Max, sum(x))
+```
+is ideal, because although the Jacobian matrix has 10,000 rows, we can compute
+the derivative of `sin(x[i])` as `cos(x[i])`, and then fill in the Jacobian by
+evaluating the derivative function instead of having to differentiation 10,000
+expressions.
+
+The symbolic differentiation approach of Gravity works poorly if there are a
+large number of unique constraints in the model (which would require a lot of
+expressions to be symbolically differentiated), or if the nonlinear functions
+contain a large number of nonlinear terms (which would make the symbolic
+derivative expensive to compute).

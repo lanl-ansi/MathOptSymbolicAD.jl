@@ -1,3 +1,17 @@
+abstract type _AbstractFunction end
+
+"""
+    _Operation
+
+An enum representing different node types in a symbolic expression graph.
+
+ * `_OP_COEFFICIENT`: a numerical `Float64`
+ * `_OP_VARIABLE`: a decision variable
+ * `_OP_OPERATION`: a function call
+ * `_OP_INTEGER_EXPONENT`: a special case for handling integer polynomials such
+   as `x^2`, since the `2.0` is usually structural rather than a coefficient
+   that differs between expressions.
+"""
 @enum(
     _Operation,
     _OP_COEFFICIENT,
@@ -6,8 +20,47 @@
     _OP_INTEGER_EXPONENT,
 )
 
-abstract type _AbstractFunction end
+"""
+    _Node
 
+A type to represent a node in the symbolic expression graph.
+
+!!! warning
+    `_Node`s can only be used in conjunction with `_Function`.
+
+`_Node` has the following fields:
+
+ * `.head::_Operation`: this describes the node type
+ * `.hash::UInt64`: a hash of the expression tree rooted at this node. See the
+   Fast hashing section for more details.
+ * `.index::Int` : interpretation depends on `.head`. If head is:
+   * `_OP_COEFFICIENT`, the index into `f.data`
+   * `_OP_VARIABLE`, the index into `f.ordered_variables`
+   * `_OP_INTEGER_EXPONENT`, the integer exponent `children[1]^index`
+ * `.operation::Symbol` : the symbolic name of the function call, if `.head` is
+   `_OP_OPERATION`, otherwise this can be ignored.
+ * `.children::Union{Nothing,Vector{_Node}}` : a vector of children of the node,
+   if `.head` is `_OP_OPERATION`, otherwise `nothing`.
+
+## Fast hashing
+
+The expression graph is structured as a Merkle tree (a.k.a. a hash tree). That
+is, each node contains a field `.hash`, which is the hash of the node's
+operation with the hash of its children. Since children are also nodes, hashing
+a child is an O(1) lookup of `child.hash`. Moreover, two expressions are
+structurally identical if the have the same hash when converted into `_Node`
+form.
+
+## Other considerations
+
+Through experience, the representation of the symbolic expression graph is not
+the bottleneck in a nonlinear optimization model. Therefore, we choose the
+somewhat inefficient storage rpresentation of
+`children::Union{Nothing,Vector{_Node}}` for the list of children. This results
+in a GC tracked object for each node that has children. If memory issues are
+identified in future, changing how we represent the expression graph is one
+promising avenue of investigation.
+"""
 struct _Node
     head::_Operation
     hash::UInt
@@ -16,21 +69,30 @@ struct _Node
     children::Union{Nothing,Vector{_Node}}
 
     function _Node(f::_AbstractFunction, coefficient::Float64)
+        # Store the coefficient
         push!(f.data, coefficient)
-        return new(
-            _OP_COEFFICIENT,
-            hash(_OP_COEFFICIENT),
-            length(f.data),
-            :NONE,
-            nothing,
-        )
+        # Compute the hash of the node. Because all coefficients are alike, this
+        # is just the hash of `_OP_COEFFICIENT`.
+        h = hash(_OP_COEFFICIENT)
+        # Index is the length of `f.data` when we need to look it up again.
+        index = length(f.data)
+        return new(_OP_COEFFICIENT, h, index, :NONE, nothing)
     end
     function _Node(f::_AbstractFunction, variable::MOI.VariableIndex)
+        # We need to convert the variable to the order in which it will appear
+        # in .ordered_variables. Currently, the order is stored in
+        # `f.variables`...
         lookup = f.variables::Dict{MOI.VariableIndex,Int}
+        # And if the variable hasn't been seen yet, add a new index
         index = get!(lookup, variable, length(lookup) + 1)
-        return new(_OP_VARIABLE, hash(_OP_VARIABLE), index, :NONE, nothing)
+        # The hash of this node depends on the variable and it's position in
+        # ordered_variables.
+        h = hash(_OP_VARIABLE, hash(index))
+        return new(_OP_VARIABLE, h, index, :NONE, nothing)
     end
     function _Node(::_AbstractFunction, operation::Symbol, children::_Node...)
+        # Okay, a function call. The hash depends on the operation and the
+        # children.
         h = hash(operation, _hash(children...))
         return new(_OP_OPERATION, h, 0, operation, collect(children))
     end
@@ -39,21 +101,42 @@ struct _Node
     # disables a lot of potential optimizations, so it's worth special-casing
     # this. Other operations aren't as important.
     function _Node(::_AbstractFunction, ::typeof(^), x::_Node, N::Int)
-        return new(_OP_INTEGER_EXPONENT, hash(^, _hash(x, N)), N, :^, [x])
+        # The hash depends on ^, as well as the child node `x` and the
+        # exponent `N`
+        h = hash(_OP_INTEGER_EXPONENT, hash(_hash(x), hash(N)))
+        return new(_OP_INTEGER_EXPONENT, h, N, :^, [x])
     end
 end
 
-_hash(a::_Node, N::Int) = hash(a.hash, hash(N))
-
-_hash(a::_Node, args::_Node...) = hash(a.hash, _hash(args...))
-
+# The hash of a child is an O(1) lookup
 _hash(child::_Node) = child.hash
 
+# Recursively has nodes together
+_hash(a::_Node, args::_Node...) = hash(a.hash, _hash(args...))
+
+"""
+    _Function(expr::Expr)
+
+This function parses the Julia expression `expr` into a `_Function`.
+
+`_Function` has the following fields:
+
+ * `ordered_variables`: a vector containing the `.value` indices of each
+   variable in the order that they are discovered in the expression tree.
+ * `coefficients::Vector{Float64}`: a vector to store the numerical input values
+   of `x`.
+ * `data::Vector{Float64}`: the list of numerical coefficients that appear in
+   `expr`
+ * `expr::_Node`: the symbolic representation of `expr`.
+
+For more information on how to interpret the fields, see `_Node`.
+"""
 mutable struct _Function <: _AbstractFunction
     ordered_variables::Vector{Int}
     coefficients::Vector{Float64}
     data::Vector{Float64}
     expr::_Node
+    # A field that is only used when constructing the _Function
     variables::Union{Nothing,Dict{MOI.VariableIndex,Int}}
     function _Function(expr::Expr)
         f = new()
@@ -73,6 +156,14 @@ end
 _is_integer(::Any) = false
 _is_integer(x::Real) = Base.isinteger(x)
 
+"""
+    _Node(f::_Function, expr::Expr)
+
+Parse `expr` into `f` and return a `_Node`.
+
+!!! warning
+    This function gets called recursively.
+"""
 function _Node(f::_Function, expr::Expr)
     if isexpr(expr, :call)
         # Performance optimization: most calls will be unary or binary
@@ -102,38 +193,6 @@ function _Node(f::_Function, expr::Expr)
     end
 end
 
-function _expr_to_symbolics(expr::_Node, p, x)
-    if expr.head == _OP_COEFFICIENT
-        return p[expr.index]
-    elseif expr.head == _OP_VARIABLE
-        return x[expr.index]
-    elseif expr.head == _OP_OPERATION
-        f = getfield(Base, expr.operation)
-        return f((_expr_to_symbolics(c, p, x) for c in expr.children)...)
-    else
-        @assert expr.head == _OP_INTEGER_EXPONENT
-        return _expr_to_symbolics(expr.children[1], p, x)^expr.index
-    end
-end
-
-function _nonlinear_constraint(expr::Expr)
-    lower, upper, body = -Inf, Inf, :()
-    if isexpr(expr, :call, 3)
-        if expr.args[1] == :(>=)
-            lower, upper, body = expr.args[1], expr.args[5], expr.args[3]
-        elseif expr.args[1] == :(<=)
-            lower, upper, body = -Inf, expr.args[3], expr.args[2]
-        else
-            @assert expr.args[1] == :(==)
-            lower, upper, body = expr.args[3], expr.args[3], expr.args[2]
-        end
-    else
-        @assert isexpr(expr, :comparison, 5)
-        lower, upper, body = expr.args[1], expr.args[5], expr.args[3]
-    end
-    return _Function(body), MOI.NLPBoundsPair(lower, upper)
-end
-
 struct _SymbolicsFunction{F,G,H}
     f::F
     ∇f::G
@@ -141,6 +200,26 @@ struct _SymbolicsFunction{F,G,H}
     g::Vector{Float64}
     H::Vector{Float64}
     H_structure::Vector{Tuple{Int,Int}}
+end
+
+"""
+    _expr_to_symbolics(expr::_Node, p, x)
+
+Convert a `_Node` into a `Symbolics.jl` expression via operator overloading.
+"""
+function _expr_to_symbolics(expr::_Node, p, x)
+    if expr.head == _OP_COEFFICIENT
+        return p[expr.index]
+    elseif expr.head == _OP_VARIABLE
+        return x[expr.index]
+    elseif expr.head == _OP_OPERATION
+        # TODO(odow): improve this lookup of expr.operation to function.
+        f = getfield(Base, expr.operation)
+        return f((_expr_to_symbolics(c, p, x) for c in expr.children)...)
+    else
+        @assert expr.head == _OP_INTEGER_EXPONENT
+        return _expr_to_symbolics(expr.children[1], p, x)^expr.index
+    end
 end
 
 function _SymbolicsFunction(f::_Function, features::Vector{Symbol})
@@ -425,6 +504,24 @@ function MOI.eval_hessian_lagrangian(
     end
     oracle.eval_hessian_lagrangian_timer += time() - start
     return
+end
+
+function _nonlinear_constraint(expr::Expr)
+    lower, upper, body = -Inf, Inf, :()
+    if isexpr(expr, :call, 3)
+        if expr.args[1] == :(>=)
+            lower, upper, body = expr.args[1], expr.args[5], expr.args[3]
+        elseif expr.args[1] == :(<=)
+            lower, upper, body = -Inf, expr.args[3], expr.args[2]
+        else
+            @assert expr.args[1] == :(==)
+            lower, upper, body = expr.args[3], expr.args[3], expr.args[2]
+        end
+    else
+        @assert isexpr(expr, :comparison, 5)
+        lower, upper, body = expr.args[1], expr.args[5], expr.args[3]
+    end
+    return _Function(body), MOI.NLPBoundsPair(lower, upper)
 end
 
 """
