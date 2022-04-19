@@ -482,7 +482,7 @@ end
 function _to_expr(
     data::MOI.Nonlinear.NonlinearData,
     expr::MOI.Nonlinear.NonlinearExpression,
-    variable_order::Dict{Int,Int},
+    variable_order::Dict{Int64,Int},
     subexpressions::Vector{Expr},
 )
     tree = Any[]
