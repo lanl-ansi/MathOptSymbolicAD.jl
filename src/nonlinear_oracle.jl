@@ -256,19 +256,11 @@ function _SymbolicsFunction(f::_Function, features::Vector{Symbol})
 end
 
 """
-    AbstractNonlinearOracleBackend
-
-An abstract type to help dispatch on different implementations of the function
-evaluations.
-"""
-abstract type AbstractNonlinearOracleBackend end
-
-"""
-    DefaultBackend() <: AbstractNonlinearOracleBackend
+    DefaultBackend() <: AbstractSymbolicBackend
 
 A simple implementation that loops over the different constraints.
 """
-struct DefaultBackend <: AbstractNonlinearOracleBackend end
+struct DefaultBackend <: AbstractSymbolicBackend end
 
 mutable struct _NonlinearOracle{B} <: MOI.AbstractNLPEvaluator
     backend::B
@@ -276,11 +268,6 @@ mutable struct _NonlinearOracle{B} <: MOI.AbstractNLPEvaluator
     constraints::Vector{_Function}
     symbolic_functions::Dict{UInt,_SymbolicsFunction}
     hessian_sparsity_map::Vector{Int}
-    eval_objective_timer::Float64
-    eval_objective_gradient_timer::Float64
-    eval_constraint_timer::Float64
-    eval_constraint_jacobian_timer::Float64
-    eval_hessian_lagrangian_timer::Float64
     function _NonlinearOracle(backend::B, objective, constraints) where {B}
         return new{B}(
             backend,
@@ -288,27 +275,19 @@ mutable struct _NonlinearOracle{B} <: MOI.AbstractNLPEvaluator
             constraints,
             Dict{UInt,_SymbolicsFunction}(),
             Int[],
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
         )
     end
 end
 
 function MOI.initialize(
     ::_NonlinearOracle,
-    ::AbstractNonlinearOracleBackend,
+    ::AbstractSymbolicBackend,
     ::Vector{Symbol},
 )
     return
 end
 
 function MOI.initialize(oracle::_NonlinearOracle, features::Vector{Symbol})
-    oracle.eval_constraint_timer = 0.0
-    oracle.eval_constraint_jacobian_timer = 0.0
-    oracle.eval_hessian_lagrangian_timer = 0.0
     hashes = map(f -> f.expr.hash, oracle.constraints)
     for h in unique(hashes)
         f = oracle.constraints[findfirst(isequal(h), hashes)]
@@ -370,10 +349,8 @@ function MOI.eval_objective(
     oracle::_NonlinearOracle,
     x::AbstractVector{Float64},
 )
-    start = time()
     @assert oracle.objective !== nothing
     objective_value = _eval_function(oracle, oracle.objective, x)
-    oracle.eval_objective_timer += time() - start
     return objective_value
 end
 
@@ -382,14 +359,12 @@ function MOI.eval_objective_gradient(
     g::AbstractVector{Float64},
     x::AbstractVector{Float64},
 )
-    start = time()
     @assert oracle.objective !== nothing
     ∇f = _eval_gradient(oracle, oracle.objective, x)
     fill!(g, 0.0)
     for (i, v) in enumerate(oracle.objective.ordered_variables)
         @inbounds g[v] = ∇f[i]
     end
-    oracle.eval_objective_gradient_timer += time() - start
     return
 end
 
@@ -398,11 +373,9 @@ function MOI.eval_constraint(
     g::AbstractVector{Float64},
     x::AbstractVector{Float64},
 )
-    start = time()
     for (row, c) in enumerate(oracle.constraints)
         g[row] = _eval_function(oracle, c, x)
     end
-    oracle.eval_constraint_timer += time() - start
     return
 end
 
@@ -421,7 +394,6 @@ function MOI.eval_constraint_jacobian(
     J::AbstractVector{Float64},
     x::AbstractVector{Float64},
 )
-    start = time()
     k = 1
     for c in oracle.constraints
         g = _eval_gradient(oracle, c, x)
@@ -430,7 +402,6 @@ function MOI.eval_constraint_jacobian(
             k += 1
         end
     end
-    oracle.eval_constraint_jacobian_timer += time() - start
     return
 end
 
@@ -483,7 +454,6 @@ function MOI.eval_hessian_lagrangian(
     μ::AbstractVector{Float64},
 )
     fill!(H, 0.0)
-    start = time()
     k = 1
     if oracle.objective !== nothing && !iszero(σ)
         h = _eval_hessian(oracle, oracle.objective, x)
@@ -502,250 +472,61 @@ function MOI.eval_hessian_lagrangian(
             k += 1
         end
     end
-    oracle.eval_hessian_lagrangian_timer += time() - start
-    return
-end
-
-function _nonlinear_constraint(expr::Expr)
-    lower, upper, body = -Inf, Inf, :()
-    if isexpr(expr, :call, 3)
-        if expr.args[1] == :(>=)
-            lower, upper, body = expr.args[1], expr.args[5], expr.args[3]
-        elseif expr.args[1] == :(<=)
-            lower, upper, body = -Inf, expr.args[3], expr.args[2]
-        else
-            @assert expr.args[1] == :(==)
-            lower, upper, body = expr.args[3], expr.args[3], expr.args[2]
-        end
-    else
-        @assert isexpr(expr, :comparison, 5)
-        lower, upper, body = expr.args[1], expr.args[5], expr.args[3]
-    end
-    return _Function(body), MOI.NLPBoundsPair(lower, upper)
-end
-
-"""
-    _nlp_block_data(
-        d::MOI.AbstractNLPEvaluator;
-        backend::AbstractNonlinearOracleBackend,
-    )
-
-Convert an AbstractNLPEvaluator into a SymbolicAD instance of MOI.NLPBlockData.
-"""
-function _nlp_block_data(
-    d::MOI.AbstractNLPEvaluator;
-    backend::AbstractNonlinearOracleBackend,
-)
-    MOI.initialize(d, [:ExprGraph])
-    objective = d.has_nlobj ? _Function(MOI.objective_expr(d)) : nothing
-    n = length(d.constraints)
-    functions = Vector{_Function}(undef, n)
-    bounds = Vector{MOI.NLPBoundsPair}(undef, n)
-    for i in 1:n
-        f, bound = _nonlinear_constraint(MOI.constraint_expr(d, i))
-        functions[i], bounds[i] = f, bound
-    end
-    oracle = _NonlinearOracle(backend, objective, functions)
-    return MOI.NLPBlockData(bounds, oracle, d.has_nlobj)
-end
-
-###
-### ThreadedBackend
-###
-
-struct _ConstraintOffset
-    index::Int
-    ∇f_offset::Int
-    ∇²f_offset::Int
-end
-
-struct ThreadedBackend <: AbstractNonlinearOracleBackend
-    offsets::Vector{Vector{_ConstraintOffset}}
-    ThreadedBackend() = new(Vector{_ConstraintOffset}[])
-end
-
-function MOI.initialize(
-    oracle::_NonlinearOracle,
-    backend::ThreadedBackend,
-    ::Vector{Symbol},
-)
-    obj_hess_offset = 0
-    if oracle.objective !== nothing
-        h = oracle.objective.expr.hash
-        obj_hess_offset = length(oracle.symbolic_functions[h].H)
-    end
-    offsets = Dict{UInt,Vector{_ConstraintOffset}}(
-        h => _ConstraintOffset[] for h in keys(oracle.symbolic_functions)
-    )
-    index, ∇f_offset, ∇²f_offset = 1, 1, obj_hess_offset + 1
-    for f in oracle.constraints
-        push!(
-            offsets[f.expr.hash],
-            _ConstraintOffset(index, ∇f_offset, ∇²f_offset),
-        )
-        index += 1
-        symbolic_function = oracle.symbolic_functions[f.expr.hash]
-        ∇f_offset += length(symbolic_function.g)
-        ∇²f_offset += length(symbolic_function.H)
-    end
-    for v in values(offsets)
-        push!(backend.offsets, v)
-    end
-    return
-end
-
-function MOI.eval_constraint(
-    oracle::_NonlinearOracle{ThreadedBackend},
-    g::AbstractVector{Float64},
-    x::AbstractVector{Float64},
-)
-    start = time()
-    Threads.@threads for offsets in oracle.backend.offsets
-        for c in offsets
-            func = oracle.constraints[c.index]
-            @inbounds g[c.index] = _eval_function(oracle, func, x)
-        end
-    end
-    oracle.eval_constraint_timer += time() - start
-    return
-end
-
-function MOI.eval_constraint_jacobian(
-    oracle::_NonlinearOracle{ThreadedBackend},
-    J::AbstractVector{Float64},
-    x::AbstractVector{Float64},
-)
-    start = time()
-    Threads.@threads for offset in oracle.backend.offsets
-        for c in offset
-            func = oracle.constraints[c.index]
-            g = _eval_gradient(oracle, func, x)
-            for i in 1:length(g)
-                @inbounds J[c.∇f_offset+i-1] = g[i]
-            end
-        end
-    end
-    oracle.eval_constraint_jacobian_timer += time() - start
-    return
-end
-
-function _hessian_lagrangian_structure(
-    structure::Vector{Tuple{Int,Int}},
-    oracle::_NonlinearOracle{ThreadedBackend},
-    ::Dict{Tuple{Int,Int},Int},
-    c::_Function,
-)
-    f = oracle.symbolic_functions[c.expr.hash]
-    for (i, j) in f.H_structure
-        row, col = c.ordered_variables[i], c.ordered_variables[j]
-        push!(structure, row >= col ? (row, col) : (col, row))
-    end
-    return
-end
-
-function MOI.eval_hessian_lagrangian(
-    oracle::_NonlinearOracle{ThreadedBackend},
-    H::AbstractVector{Float64},
-    x::AbstractVector{Float64},
-    σ::Float64,
-    μ::AbstractVector{Float64},
-)
-    fill!(H, 0.0)
-    start = time()
-    hessian_offset = 0
-    if oracle.objective !== nothing && !iszero(σ)
-        h = _eval_hessian(oracle, oracle.objective, x)
-        for i in 1:length(h)
-            H[i] = σ * h[i]
-        end
-        hessian_offset += length(h)
-    end
-    Threads.@threads for offset in oracle.backend.offsets
-        for c in offset
-            if iszero(μ[c.index])
-                continue
-            end
-            func = oracle.constraints[c.index]
-            h = _eval_hessian(oracle, func, x)
-            for i in 1:length(h)
-                @inbounds H[c.∇²f_offset+i-1] = μ[c.index] * h[i]
-            end
-        end
-    end
-    oracle.eval_hessian_lagrangian_timer += time() - start
     return
 end
 
 ###
-### JuMP integration
+### MOI integration
 ###
 
 function _to_expr(
-    nlp_data::JuMP._NLPData,
-    data::JuMP._NonlinearExprData,
+    data::MOI.Nonlinear.NonlinearData,
+    expr::MOI.Nonlinear.NonlinearExpression,
+    variable_order::Dict{Int,Int},
     subexpressions::Vector{Expr},
 )
     tree = Any[]
-    for node in data.nd
-        expr = if node.nodetype == JuMP._Derivatives.CALL
-            Expr(:call, JuMP._Derivatives.operators[node.index])
-        elseif node.nodetype == JuMP._Derivatives.CALLUNIVAR
-            Expr(:call, JuMP._Derivatives.univariate_operators[node.index])
-        elseif node.nodetype == JuMP._Derivatives.SUBEXPRESSION
+    for node in expr.nodes
+        node_expr = if node.type == MOI.Nonlinear.NODE_CALL_MULTIVARIATE
+            Expr(:call, data.operators.multivariate_operators[node.index])
+        elseif node.type == MOI.Nonlinear.NODE_CALL_UNIVARIATE
+            Expr(:call, data.operators.univariate_operators[node.index])
+        elseif node.type == MOI.Nonlinear.NODE_SUBEXPRESSION
             subexpressions[node.index]
-        elseif node.nodetype == JuMP._Derivatives.MOIVARIABLE
-            MOI.VariableIndex(node.index)
-        elseif node.nodetype == JuMP._Derivatives.PARAMETER
-            nlp_data.nlparamvalues[node.index]
+        elseif node.type == MOI.Nonlinear.NODE_MOI_VARIABLE
+            MOI.VariableIndex(variable_order[node.index])
+        elseif node.type == MOI.Nonlinear.NODE_PARAMETER
+            data.parameters[node.index]
         else
-            @assert node.nodetype == JuMP._Derivatives.VALUE
-            data.const_values[node.index]
+            @assert node.type == MOI.Nonlinear.NODE_VALUE
+            expr.values[node.index]
         end
         if 1 <= node.parent <= length(tree)
-            push!(tree[node.parent].args, expr)
+            push!(tree[node.parent].args, node_expr)
         end
-        push!(tree, expr)
+        push!(tree, node_expr)
     end
     return tree[1]
 end
 
-_to_expr(::JuMP._NLPData, ::Nothing, ::Vector{Expr}) = nothing
-
-function _nlp_block_data(
-    model::JuMP.Model;
-    backend::AbstractNonlinearOracleBackend,
+function MOI.Nonlinear.set_differentiation_backend(
+    data::MOI.Nonlinear.NonlinearData,
+    backend::AbstractSymbolicBackend,
+    ordered_variables::Vector{MOI.VariableIndex},
 )
-    return _nlp_block_data(model.nlp_data; backend = backend)
-end
-
-function _nlp_block_data(
-    nlp_data::JuMP._NLPData;
-    backend::AbstractNonlinearOracleBackend,
-)
-    subexpressions = map(nlp_data.nlexpr) do expr
-        return _to_expr(nlp_data, expr, Expr[])::Expr
+    variable_order =
+        Dict(x.value => i for (i, x) in enumerate(ordered_variables))
+    subexpressions = map(data.expressions) do expr
+        return _to_expr(data, expr, variable_order, Expr[])::Expr
     end
-    nlobj = _to_expr(nlp_data, nlp_data.nlobj, subexpressions)
-    objective = nlobj === nothing ? nothing : _Function(nlobj)
-    functions = map(nlp_data.nlconstr) do c
-        return _Function(_to_expr(nlp_data, c.terms, subexpressions))
+    objective = nothing
+    if data.objective !== nothing
+        obj = _to_expr(data, data.objective, variable_order, subexpressions)
+        objective = _Function(obj)
     end
-    return MOI.NLPBlockData(
-        [MOI.NLPBoundsPair(c.lb, c.ub) for c in nlp_data.nlconstr],
-        _NonlinearOracle(backend, objective, functions),
-        objective !== nothing,
-    )
-end
-
-function optimize_hook(
-    model::JuMP.Model;
-    backend::AbstractNonlinearOracleBackend = DefaultBackend(),
-)
-    nlp_block = _nlp_block_data(model; backend = backend)
-    nlp_data = model.nlp_data
-    model.nlp_data = nothing
-    MOI.set(model, MOI.NLPBlock(), nlp_block)
-    JuMP.optimize!(model; ignore_optimize_hook = true)
-    model.nlp_data = nlp_data
+    functions = _Function[
+        _Function(_to_expr(data, c.expression, variable_order, subexpressions)) for (_, c) in data.constraints
+    ]
+    data.inner = _NonlinearOracle(backend, objective, functions)
     return
 end
