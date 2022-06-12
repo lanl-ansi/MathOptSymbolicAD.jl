@@ -475,8 +475,8 @@ end
 ###
 
 function _to_expr(
-    data::MOI.Nonlinear.NonlinearData,
-    expr::MOI.Nonlinear.NonlinearExpression,
+    data::MOI.Nonlinear.Model,
+    expr::MOI.Nonlinear.Expression,
     variable_order::Dict{Int64,Int},
     subexpressions::Vector{Expr},
 )
@@ -504,24 +504,27 @@ function _to_expr(
     return tree[1]
 end
 
-function MOI.Nonlinear.set_differentiation_backend(
-    data::MOI.Nonlinear.NonlinearData,
+function MOI.Nonlinear.Evaluator(
+    model::MOI.Nonlinear.Model,
     backend::AbstractSymbolicBackend,
     ordered_variables::Vector{MOI.VariableIndex},
 )
     variable_order =
         Dict(x.value => i for (i, x) in enumerate(ordered_variables))
-    subexpressions = map(data.expressions) do expr
-        return _to_expr(data, expr, variable_order, Expr[])::Expr
+    subexpressions = map(model.expressions) do expr
+        return _to_expr(model, expr, variable_order, Expr[])::Expr
     end
     objective = nothing
-    if data.objective !== nothing
-        obj = _to_expr(data, data.objective, variable_order, subexpressions)
+    if model.objective !== nothing
+        obj = _to_expr(model, model.objective, variable_order, subexpressions)
         objective = _Function(obj)
     end
-    functions = _Function[
-        _Function(_to_expr(data, c.expression, variable_order, subexpressions)) for (_, c) in data.constraints
-    ]
-    data.inner = _NonlinearOracle(backend, objective, functions)
-    return
+    functions = map(values(model.constraints)) do c
+        expr = _to_expr(model, c.expression, variable_order, subexpressions)
+        return _Function(expr)
+    end
+    return MOI.Nonlinear.Evaluator(
+        model,
+        _NonlinearOracle(backend, objective, functions),
+    )
 end

@@ -1,5 +1,4 @@
 import Pkg
-Pkg.add(Pkg.PackageSpec(name = "MathOptInterface", rev = "od/nonlinear"))
 Pkg.add(Pkg.PackageSpec(name = "JuMP", rev = "od/moi-nonlinear"))
 
 module RunTests
@@ -88,8 +87,7 @@ function _run_unit_benchmark(model, backend, seed)
         return lb + (ub - lb) * rand()
     end
     f, ∇f = 0.0, zeros(length(x))
-    if d.objective !== nothing
-        @show d.objective
+    if d.model.objective !== nothing
         # MOI.eval_objective
         @info "MOI.eval_objective"
         @time MOI.eval_objective(d, x)
@@ -102,7 +100,7 @@ function _run_unit_benchmark(model, backend, seed)
     end
     # MOI.eval_constraint
     @info "MOI.eval_constraint"
-    g = zeros(length(d.constraints))
+    g = zeros(length(d.model.constraints))
     @time MOI.eval_constraint(d, g, x)
     @time MOI.eval_constraint(d, g, x)
     # MOI.jacobian_structure
