@@ -1,5 +1,5 @@
 import Pkg
-Pkg.add(Pkg.PackageSpec(name = "JuMP", rev = "od/moi-nonlinear"))
+Pkg.add(Pkg.PackageSpec(name = "JuMP", rev = "master"))
 
 module RunTests
 
@@ -72,7 +72,7 @@ end
 
 function _run_unit_benchmark(model, backend, seed)
     @info "Constructing oracles"
-    @time d = JuMP.NLPEvaluator(model; differentiation_backend = backend)
+    @time d = JuMP.NLPEvaluator(model; _differentiation_backend = backend)
     @info "MOI.initialize"
     @time MOI.initialize(d, [:Grad, :Jac, :Hess])
     Random.seed!(seed)
@@ -159,7 +159,7 @@ end
 
 function _run_solution_benchmark(model, optimizer, backend)
     set_optimizer(model, optimizer)
-    optimize!(model; differentiation_backend = backend)
+    optimize!(model; _differentiation_backend = backend)
     println("Timing statistics")
     nlp_block = MOI.get(model, MOI.NLPBlock())
     println(" - ", nlp_block.evaluator.eval_constraint_timer)
@@ -244,7 +244,7 @@ function test_optimizer_clnlbeam(; N::Int = 10)
         @NLconstraint(model, x[i+1] - x[i] == h / 2 * (sin(t[i+1]) + sin(t[i])))
         @constraint(model, t[i+1] - t[i] == h / 2 * (u[i+1] - u[i]))
     end
-    optimize!(model; differentiation_backend = SymbolicAD.DefaultBackend())
+    optimize!(model; _differentiation_backend = SymbolicAD.DefaultBackend())
     Test.@test isapprox(objective_value(model), 350; atol = 1e-6)
     t_sol = value.(t)
     u_sol = value.(u)
@@ -262,7 +262,7 @@ end
 function test_optimizer_case5_pjm()
     model = power_model("pglib_opf_case5_pjm.m")
     set_optimizer(model, Ipopt.Optimizer)
-    optimize!(model; differentiation_backend = SymbolicAD.DefaultBackend())
+    optimize!(model; _differentiation_backend = SymbolicAD.DefaultBackend())
     symbolic_obj = objective_value(model)
     optimize!(model)
     Test.@test isapprox(objective_value(model), symbolic_obj, atol = 1e-6)

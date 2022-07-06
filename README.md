@@ -21,7 +21,7 @@ import Ipopt
 import SymbolicAD
 model = Model(Ipopt.Optimizer)
 # ...
-optimize!(model; differentiation_backend = SymbolicAD.DefaultBackend())
+optimize!(model; _differentiation_backend = SymbolicAD.DefaultBackend())
 ```
 
 ## Background
