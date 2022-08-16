@@ -1,6 +1,3 @@
-import Pkg
-Pkg.add(Pkg.PackageSpec(name = "JuMP", rev = "master"))
-
 module RunTests
 
 using JuMP
