@@ -120,7 +120,7 @@ _hash(child::_Node) = child.hash
 _hash(a::_Node, args::_Node...) = hash(a.hash, _hash(args...))
 
 """
-    _Function(expr::Expr)
+    _Function(model::MOI.Nonlinear.Model, expr::Expr)
 
 This function parses the Julia expression `expr` into a `_Function`.
 
@@ -143,7 +143,8 @@ mutable struct _Function <: _AbstractFunction
     expr::_Node
     # A field that is only used when constructing the _Function
     variables::Union{Nothing,Dict{MOI.VariableIndex,Int}}
-    function _Function(expr::Expr)
+    model::MOI.Nonlinear.Model
+    function _Function(model::MOI.Nonlinear.Model, expr::Expr)
         f = new()
         f.variables = Dict{MOI.VariableIndex,Int}()
         f.data = Float64[]
@@ -154,6 +155,7 @@ mutable struct _Function <: _AbstractFunction
             f.ordered_variables[v] = k.value
         end
         f.variables = nothing
+        f.model = model
         return f
     end
 end
@@ -203,22 +205,40 @@ struct _SymbolicsFunction{F,G,H}
 end
 
 """
-    _expr_to_symbolics(expr::_Node, p, x)
+    _expr_to_symbolics(model::MOI.Nonlinear.Model, expr::_Node, p, x)
 
 Convert a `_Node` into a `Symbolics.jl` expression via operator overloading.
 """
-function _expr_to_symbolics(expr::_Node, p, x)
+function _expr_to_symbolics(model::MOI.Nonlinear.Model, expr::_Node, p, x)
     if expr.head == _OP_COEFFICIENT
         return p[expr.index]
     elseif expr.head == _OP_VARIABLE
         return x[expr.index]
     elseif expr.head == _OP_OPERATION
-        # TODO(odow): improve this lookup of expr.operation to function.
-        f = getfield(Base, expr.operation)
-        return f((_expr_to_symbolics(c, p, x) for c in expr.children)...)
+        args = [_expr_to_symbolics(model, c, p, x) for c in expr.children]
+        if hasproperty(Base, expr.operation)
+            return getproperty(Base, expr.operation)(args...)
+        end
+        # If the function isn't defined in Base, defer to the operator registry.
+        # We don't do this for all functions, because MOI uses NaNMath, which
+        # doesn't work with Symbolics. But this will work with SpecialFunctions
+        # and user-defined functions (which don't use NaNMath).
+        if length(args) == 1
+            return MOI.Nonlinear.eval_univariate_function(
+                model.operators,
+                expr.operation,
+                args[1],
+            )
+        else
+            return MOI.Nonlinear.eval_multivariate_function(
+                model.operators,
+                expr.operation,
+                args,
+            )
+        end
     else
         @assert expr.head == _OP_INTEGER_EXPONENT
-        return _expr_to_symbolics(expr.children[1], p, x)^expr.index
+        return _expr_to_symbolics(model, expr.children[1], p, x)^expr.index
     end
 end
 
@@ -226,7 +246,7 @@ function _SymbolicsFunction(f::_Function, features::Vector{Symbol})
     d, n = length(f.data), length(f.ordered_variables)
     Symbolics.@variables(p[1:d], x[1:n])
     p, x = collect(p), collect(x)
-    f_expr = _expr_to_symbolics(f.expr, p, x)
+    f_expr = _expr_to_symbolics(f.model, f.expr, p, x)
     f = Symbolics.build_function(f_expr, p, x; expression = Val{false})
     if :Jac in features || :Grad in features
         ∇f_expr = Symbolics.gradient(f_expr, x)
@@ -522,11 +542,11 @@ function MOI.Nonlinear.Evaluator(
     objective = nothing
     if model.objective !== nothing
         obj = _to_expr(model, model.objective, variable_order, subexpressions)
-        objective = _Function(obj)
+        objective = _Function(model, obj)
     end
     functions = map(values(model.constraints)) do c
         expr = _to_expr(model, c.expression, variable_order, subexpressions)
-        return _Function(expr)
+        return _Function(model, expr)
     end
     return MOI.Nonlinear.Evaluator(
         model,
