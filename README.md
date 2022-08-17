@@ -1,9 +1,9 @@
 # SymbolicAD
 
-**This is package is an experimental work-in-progress. Use at your own risk.**
-
 This package implements an experimental symbolic automatic differentiation
 backend for JuMP.
+
+For more details, see Oscar's [JuMP-dev 2022 talk](https://www.youtube.com/watch?v=d_X3gj3Iz-k).
 
 ## Installation
 
