@@ -271,6 +271,17 @@ function test_optimizer_case5_pjm()
     return
 end
 
+function test_user_defined_functions()
+    model = Model(Ipopt.Optimizer)
+    @variable(model, 0.5 <= x <= 1.0)
+    register(model, :mysin, 1, a -> sin(a); autodiff = true)
+    register(model, :pow, 2, (a, b) -> a^b; autodiff = true)
+    @NLobjective(model, Max, mysin(x) + log(x) + dawson(x) - pow(x, 2))
+    optimize!(model; _differentiation_backend = SymbolicAD.DefaultBackend())
+    Test.@test termination_status(model) == LOCALLY_SOLVED
+    return
+end
+
 end  # module
 
 RunTests.runtests()
