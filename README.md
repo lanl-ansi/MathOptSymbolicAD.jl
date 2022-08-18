@@ -1,4 +1,4 @@
-# SymbolicAD
+# MathOptSymbolicAD
 
 This package implements an experimental symbolic automatic differentiation
 backend for JuMP.
@@ -7,10 +7,10 @@ For more details, see Oscar's [JuMP-dev 2022 talk](https://www.youtube.com/watch
 
 ## Installation
 
-Install SymbolicAD as follows:
+Install MathOptSymbolicAD as follows:
 ```julia
 import Pkg
-Pkg.add("https://github.com/odow/SymbolicAD.jl)
+Pkg.add("https://github.com/odow/MathOptSymbolicAD.jl)
 ```
 
 ## Use with JuMP
@@ -18,15 +18,15 @@ Pkg.add("https://github.com/odow/SymbolicAD.jl)
 ```julia
 using JuMP
 import Ipopt
-import SymbolicAD
+import MathOptSymbolicAD
 model = Model(Ipopt.Optimizer)
 # ...
-optimize!(model; _differentiation_backend = SymbolicAD.DefaultBackend())
+optimize!(model; _differentiation_backend = MathOptSymbolicAD.DefaultBackend())
 ```
 
 ## Background
 
-`SymbolicAD` is inspired by Hassan Hijazi's work on
+`MathOptSymbolicAD` is inspired by Hassan Hijazi's work on
 [coin-or/gravity](https://github.com/coin-or/Gravity), a high-performance
 algebraic modeling language in C++.
 

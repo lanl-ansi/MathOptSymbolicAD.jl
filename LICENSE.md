@@ -1,4 +1,4 @@
-SymbolicAD.jl is licensed under the MIT License:
+MathOptSymbolicAD.jl is licensed under the MIT License:
 
 > Copyright (c) 2022: Oscar Dowson
 >

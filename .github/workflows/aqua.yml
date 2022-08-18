@@ -19,5 +19,5 @@ jobs:
           using Pkg
           Pkg.add(PackageSpec(name="Aqua"))
           Pkg.develop(PackageSpec(path=pwd()))
-          using SymbolicAD, Aqua
-          Aqua.test_all(SymbolicAD; ambiguities = false)
+          using MathOptSymbolicAD, Aqua
+          Aqua.test_all(MathOptSymbolicAD; ambiguities = false)

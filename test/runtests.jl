@@ -12,7 +12,7 @@ import LinearAlgebra
 import PowerModels
 import Random
 import SparseArrays
-import SymbolicAD
+import MathOptSymbolicAD
 import Test
 
 function runtests()
@@ -30,8 +30,8 @@ end
     run_unit_benchmark(model::JuMP.Model; atol::Float64 = 1e-10)
 
 Given a JuMP Model `model`, run a series of unit tests. This can be helpful to
-test differences between JuMP and SymbolicAD (using an atol of `atol`), and also
-to check relative performance.
+test differences between JuMP and MathOptSymbolicAD (using an atol of `atol`),
+and also to check relative performance.
 """
 function run_unit_benchmark(
     model::JuMP.Model;
@@ -39,7 +39,7 @@ function run_unit_benchmark(
     rtol::Float64 = 0.0,
 )
     seed = 1234
-    sym = _run_unit_benchmark(model, SymbolicAD.DefaultBackend(), seed)
+    sym = _run_unit_benchmark(model, MathOptSymbolicAD.DefaultBackend(), seed)
     moi = _run_unit_benchmark(model, MOI.Nonlinear.SparseReverseMode(), seed)
     # f
     Test.@test isapprox(sym.f, moi.f; atol = atol, rtol = rtol)
@@ -129,8 +129,8 @@ end
     run_solution_benchmark(model::JuMP.Model, optimizer; atol = 1e-6)
 
 Given a JuMP Model `model`, solve the problem using JuMP's built-in AD, as well
-as the `DefaultBackend` and `ThreadedBackend` of SymbolicAD and check that they
-find the same solutions.
+as the `DefaultBackend` and `ThreadedBackend` of MathOptSymbolicAD and check
+that they find the same solutions.
 
 `optimizer` must be something that can be passed to `MOI.instantiate`.
 """
@@ -146,12 +146,18 @@ function run_solution_benchmark(
         optimizer,
         MOI.Nonlinear.SparseReverseMode(),
     )
-    @info "Solving with serial SymbolicAD"
-    serial_solution =
-        _run_solution_benchmark(model, optimizer, SymbolicAD.DefaultBackend())
-    @info "Solving with threaded SymbolicAD"
-    threaded_solution =
-        _run_solution_benchmark(model, optimizer, SymbolicAD.ThreadedBackend())
+    @info "Solving with serial MathOptSymbolicAD"
+    serial_solution = _run_solution_benchmark(
+        model,
+        optimizer,
+        MathOptSymbolicAD.DefaultBackend(),
+    )
+    @info "Solving with threaded MathOptSymbolicAD"
+    threaded_solution = _run_solution_benchmark(
+        model,
+        optimizer,
+        MathOptSymbolicAD.ThreadedBackend(),
+    )
     @info "Validating solutions"
     println("Errors = ", extrema(moi_solution .- serial_solution))
     Test.@test ≈(moi_solution, serial_solution; atol = atol, rtol = rtol)
@@ -246,7 +252,10 @@ function test_optimizer_clnlbeam(; N::Int = 10)
         @NLconstraint(model, x[i+1] - x[i] == h / 2 * (sin(t[i+1]) + sin(t[i])))
         @constraint(model, t[i+1] - t[i] == h / 2 * (u[i+1] - u[i]))
     end
-    optimize!(model; _differentiation_backend = SymbolicAD.DefaultBackend())
+    optimize!(
+        model;
+        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
+    )
     Test.@test isapprox(objective_value(model), 350; atol = 1e-6)
     t_sol = value.(t)
     u_sol = value.(u)
@@ -264,7 +273,10 @@ end
 function test_optimizer_case5_pjm()
     model = power_model("pglib_opf_case5_pjm.m")
     set_optimizer(model, Ipopt.Optimizer)
-    optimize!(model; _differentiation_backend = SymbolicAD.DefaultBackend())
+    optimize!(
+        model;
+        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
+    )
     symbolic_obj = objective_value(model)
     optimize!(model)
     Test.@test isapprox(objective_value(model), symbolic_obj, atol = 1e-6)
@@ -277,7 +289,10 @@ function test_user_defined_functions()
     register(model, :mysin, 1, a -> sin(a); autodiff = true)
     register(model, :pow, 2, (a, b) -> a^b; autodiff = true)
     @NLobjective(model, Max, mysin(x) + log(x) + dawson(x) - pow(x, 2))
-    optimize!(model; _differentiation_backend = SymbolicAD.DefaultBackend())
+    optimize!(
+        model;
+        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
+    )
     Test.@test termination_status(model) == LOCALLY_SOLVED
     return
 end

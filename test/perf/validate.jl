@@ -5,7 +5,7 @@
 
 import Ipopt
 import PowerModels
-import SymbolicAD
+import MathOptSymbolicAD
 
 function power_model(case::String)
     pm = PowerModels.instantiate_model(
@@ -17,8 +17,8 @@ function power_model(case::String)
 end
 
 model = power_model("pglib_opf_case2853_sdet.m")
-SymbolicAD.run_unit_benchmark(model; direct_model = true, atol = 1e-6)
-SymbolicAD.run_solution_benchmark(model, Ipopt.Optimizer; atol = 1.0)
+MathOptSymbolicAD.run_unit_benchmark(model; direct_model = true, atol = 1e-6)
+MathOptSymbolicAD.run_solution_benchmark(model, Ipopt.Optimizer; atol = 1.0)
 
 # model = power_model("pglib_opf_case5_pjm.m")
-# SymbolicAD.run_unit_benchmark(model; direct_model = true, atol = 1e-11)
+# MathOptSymbolicAD.run_unit_benchmark(model; direct_model = true, atol = 1e-11)
