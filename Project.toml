@@ -1,4 +1,4 @@
-name = "SymbolicAD"
+name = "MathOptSymbolicAD"
 uuid = "309f4015-3481-4d63-a8f9-aeb13adfe8eb"
 authors = ["odow <o.dowson@gmail.com>"]
 version = "0.1.0"

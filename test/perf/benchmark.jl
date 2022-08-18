@@ -6,7 +6,7 @@
 import Ipopt
 import JuMP
 import PowerModels
-import SymbolicAD
+import MathOptSymbolicAD
 
 function power_model(case::String)
     pm = PowerModels.instantiate_model(
@@ -22,11 +22,14 @@ import ProfileView
 model = power_model("pglib_opf_case118_ieee.m")
 JuMP.set_optimizer(model, Ipopt.Optimizer)
 JuMP.set_optimizer_attribute(model, "print_timing_statistics", "yes")
-JuMP.optimize!(model; _differentiation_backend = SymbolicAD.DefaultBackend())
+JuMP.optimize!(
+    model;
+    _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
+)
 
 ProfileView.@profview(
     JuMP.optimize!(
         model;
-        _differentiation_backend = SymbolicAD.DefaultBackend(),
+        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
     )
 )
