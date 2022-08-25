@@ -10,7 +10,7 @@ For more details, see Oscar's [JuMP-dev 2022 talk](https://www.youtube.com/watch
 Install MathOptSymbolicAD as follows:
 ```julia
 import Pkg
-Pkg.add("https://github.com/odow/MathOptSymbolicAD.jl)
+Pkg.add("MathOptSymbolicAD")
 ```
 
 ## Use with JuMP
