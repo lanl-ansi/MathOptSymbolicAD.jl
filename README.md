@@ -20,7 +20,8 @@ using JuMP
 import Ipopt
 import MathOptSymbolicAD
 model = Model(Ipopt.Optimizer)
-# ...
+@variable(model, x[1:2])
+@NLobjective(model, Min, (1 - x[1])^2 + 100 * (x[2] - x[1]^2)^2)
 optimize!(model; _differentiation_backend = MathOptSymbolicAD.DefaultBackend())
 ```
 
