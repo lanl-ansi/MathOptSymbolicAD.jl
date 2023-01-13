@@ -536,8 +536,9 @@ function MOI.Nonlinear.Evaluator(
 )
     variable_order =
         Dict(x.value => i for (i, x) in enumerate(ordered_variables))
-    subexpressions = map(model.expressions) do expr
-        return _to_expr(model, expr, variable_order, Expr[])::Expr
+    subexpressions = Vector{Expr}(undef, length(model.expressions))
+    for (i, sub) in enumerate(model.expressions)
+        subexpressions[i] = _to_expr(model, sub, variable_order, subexpressions)
     end
     objective = nothing
     if model.objective !== nothing
