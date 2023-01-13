@@ -1,7 +1,7 @@
 name = "MathOptSymbolicAD"
 uuid = "309f4015-3481-4d63-a8f9-aeb13adfe8eb"
 authors = ["odow <o.dowson@gmail.com>"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
