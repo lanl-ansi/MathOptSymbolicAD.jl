@@ -297,6 +297,21 @@ function test_user_defined_functions()
     return
 end
 
+function test_nested_subexpressions()
+    model = Model(Ipopt.Optimizer)
+    @variable(model, 0.5 <= x <= 1.0)
+    @NLexpression(model, my_expr1, x - 1)
+    @NLexpression(model, my_expr2, my_expr1^2)
+    @NLobjective(model, Min, my_expr2)
+    optimize!(
+        model;
+        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
+    )
+    Test.@test termination_status(model) == LOCALLY_SOLVED
+    Test.@test ≈(value(x), 1.0; atol = 1e-3)
+    return
+end
+
 end  # module
 
 RunTests.runtests()
