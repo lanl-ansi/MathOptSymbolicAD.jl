@@ -503,7 +503,7 @@ function _to_expr(
     data::MOI.Nonlinear.Model,
     expr::MOI.Nonlinear.Expression,
     variable_order::Dict{Int64,Int},
-    subexpressions::Vector{Expr},
+    subexpressions::Vector{Any},
 )
     tree = Any[]
     for node in expr.nodes
@@ -536,7 +536,7 @@ function MOI.Nonlinear.Evaluator(
 )
     variable_order =
         Dict(x.value => i for (i, x) in enumerate(ordered_variables))
-    subexpressions = Vector{Expr}(undef, length(model.expressions))
+    subexpressions = Vector{Any}(undef, length(model.expressions))
     for (i, sub) in enumerate(model.expressions)
         subexpressions[i] = _to_expr(model, sub, variable_order, subexpressions)
     end

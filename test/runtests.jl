@@ -312,6 +312,21 @@ function test_nested_subexpressions()
     return
 end
 
+function test_constant_subexpressions()
+    model = Model(Ipopt.Optimizer)
+    @variable(model, 0.5 <= x <= 1.0)
+    @NLexpression(model, my_expr1, 1.0)
+    @NLexpression(model, my_expr2, x)
+    @NLobjective(model, Min, (my_expr2 - my_expr1)^2)
+    optimize!(
+        model;
+        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
+    )
+    Test.@test termination_status(model) == LOCALLY_SOLVED
+    Test.@test ≈(value(x), 1.0; atol = 1e-3)
+    return
+end
+
 end  # module
 
 RunTests.runtests()
