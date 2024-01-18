@@ -21,8 +21,13 @@ import Ipopt
 import MathOptSymbolicAD
 model = Model(Ipopt.Optimizer)
 @variable(model, x[1:2])
-@NLobjective(model, Min, (1 - x[1])^2 + 100 * (x[2] - x[1]^2)^2)
-optimize!(model; _differentiation_backend = MathOptSymbolicAD.DefaultBackend())
+@objective(model, Min, (1 - x[1])^2 + 100 * (x[2] - x[1]^2)^2)
+set_attribute(
+    model,
+    MOI.AutomaticDifferentiationBackend(),
+    MathOptSymbolicAD.DefaultBackend(),
+)
+optimize!(model)
 ```
 
 ## Background
@@ -52,7 +57,7 @@ large with few unique constraints. For example, a model like:
 ```julia
 model = Model()
 @variable(model, 0 <= x[1:10_000] <= 1)
-@NLconstraint(model, [i=1:10_000], sin(x[i]) <= 1)
+@constraint(model, [i=1:10_000], sin(x[i]) <= 1)
 @objective(model, Max, sum(x))
 ```
 is ideal, because although the Jacobian matrix has 10,000 rows, we can compute
