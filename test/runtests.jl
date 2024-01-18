@@ -290,7 +290,7 @@ function test_optimizer_clnlbeam_expr(; N::Int = 10)
     end
     set_attribute(
         model,
-        MOI.AutomaticDifferentiationBackend()
+        MOI.AutomaticDifferentiationBackend(),
         MathOptSymbolicAD.DefaultBackend(),
     )
     optimize!(model)
@@ -343,7 +343,7 @@ function test_user_defined_functions_expr()
     @objective(model, Max, mysin(x) + log(x) + dawson(x) - pow(x, 2))
     set_attribute(
         model,
-        MOI.AutomaticDifferentiationBackend()
+        MOI.AutomaticDifferentiationBackend(),
         MathOptSymbolicAD.DefaultBackend(),
     )
     optimize!(model)
@@ -374,7 +374,7 @@ function test_nested_subexpressions_expr()
     @objective(model, Min, my_expr2)
     set_attribute(
         model,
-        MOI.AutomaticDifferentiationBackend()
+        MOI.AutomaticDifferentiationBackend(),
         MathOptSymbolicAD.DefaultBackend(),
     )
     optimize!(model)
@@ -406,7 +406,7 @@ function test_constant_subexpressions_expr()
     @objective(model, Min, (my_expr2 - my_expr1)^2)
     set_attribute(
         model,
-        MOI.AutomaticDifferentiationBackend()
+        MOI.AutomaticDifferentiationBackend(),
         MathOptSymbolicAD.DefaultBackend(),
     )
     optimize!(model)
