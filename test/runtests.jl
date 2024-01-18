@@ -9,10 +9,11 @@ using JuMP
 
 import Ipopt
 import LinearAlgebra
+import MathOptSymbolicAD
 import PowerModels
 import Random
 import SparseArrays
-import MathOptSymbolicAD
+import SpecialFunctions
 import Test
 
 function runtests()
@@ -270,6 +271,44 @@ function test_optimizer_clnlbeam(; N::Int = 10)
     return
 end
 
+function test_optimizer_clnlbeam_expr(; N::Int = 10)
+    h = 1 / N
+    model = Model(Ipopt.Optimizer)
+    @variable(model, -1 <= t[1:(N+1)] <= 1)
+    @variable(model, -0.05 <= x[1:(N+1)] <= 0.05)
+    @variable(model, u[1:(N+1)])
+    @objective(
+        model,
+        Min,
+        sum(
+            h / 2 * (u[i+1]^2 + u[i]^2) +
+            350 * h / 2 * (cos(t[i+1]) + cos(t[i])) for i in 1:N
+        ),
+    )
+    for i in 1:N
+        @constraint(model, x[i+1] - x[i] == h / 2 * (sin(t[i+1]) + sin(t[i])))
+        @constraint(model, t[i+1] - t[i] == h / 2 * (u[i+1] - u[i]))
+    end
+    set_attribute(
+        model,
+        MOI.AutomaticDifferentiationBackend(),
+        MathOptSymbolicAD.DefaultBackend(),
+    )
+    optimize!(model)
+    Test.@test isapprox(objective_value(model), 350; atol = 1e-6)
+    t_sol = value.(t)
+    u_sol = value.(u)
+    Test.@test isapprox(
+        sum(
+            h / 2 * (u_sol[i+1]^2 + u_sol[i]^2) +
+            350 * h / 2 * (cos(t_sol[i+1]) + cos(t_sol[i])) for i in 1:N
+        ),
+        350.0;
+        atol = 1e-6,
+    )
+    return
+end
+
 function test_optimizer_case5_pjm()
     model = power_model("pglib_opf_case5_pjm.m")
     set_optimizer(model, Ipopt.Optimizer)
@@ -297,6 +336,26 @@ function test_user_defined_functions()
     return
 end
 
+function test_user_defined_functions_expr()
+    model = Model(Ipopt.Optimizer)
+    @variable(model, 0.5 <= x <= 1.0)
+    @operator(model, mysin, 1, a -> sin(a))
+    @operator(model, pow, 2, (a, b) -> a^b)
+    @objective(
+        model,
+        Max,
+        mysin(x) + log(x) + SpecialFunctions.dawson(x) - pow(x, 2),
+    )
+    set_attribute(
+        model,
+        MOI.AutomaticDifferentiationBackend(),
+        MathOptSymbolicAD.DefaultBackend(),
+    )
+    optimize!(model)
+    Test.@test termination_status(model) == LOCALLY_SOLVED
+    return
+end
+
 function test_nested_subexpressions()
     model = Model(Ipopt.Optimizer)
     @variable(model, 0.5 <= x <= 1.0)
@@ -312,6 +371,23 @@ function test_nested_subexpressions()
     return
 end
 
+function test_nested_subexpressions_expr()
+    model = Model(Ipopt.Optimizer)
+    @variable(model, 0.5 <= x <= 1.0)
+    @expression(model, my_expr1, x - 1)
+    @expression(model, my_expr2, my_expr1^2)
+    @objective(model, Min, my_expr2)
+    set_attribute(
+        model,
+        MOI.AutomaticDifferentiationBackend(),
+        MathOptSymbolicAD.DefaultBackend(),
+    )
+    optimize!(model)
+    Test.@test termination_status(model) == LOCALLY_SOLVED
+    Test.@test ≈(value(x), 1.0; atol = 1e-3)
+    return
+end
+
 function test_constant_subexpressions()
     model = Model(Ipopt.Optimizer)
     @variable(model, 0.5 <= x <= 1.0)
@@ -322,6 +398,23 @@ function test_constant_subexpressions()
         model;
         _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
     )
+    Test.@test termination_status(model) == LOCALLY_SOLVED
+    Test.@test ≈(value(x), 1.0; atol = 1e-3)
+    return
+end
+
+function test_constant_subexpressions_expr()
+    model = Model(Ipopt.Optimizer)
+    @variable(model, 0.5 <= x <= 1.0)
+    @expression(model, my_expr1, 1.0)
+    @expression(model, my_expr2, x)
+    @objective(model, Min, (my_expr2 - my_expr1)^2)
+    set_attribute(
+        model,
+        MOI.AutomaticDifferentiationBackend(),
+        MathOptSymbolicAD.DefaultBackend(),
+    )
+    optimize!(model)
     Test.@test termination_status(model) == LOCALLY_SOLVED
     Test.@test ≈(value(x), 1.0; atol = 1e-3)
     return
