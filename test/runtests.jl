@@ -9,10 +9,11 @@ using JuMP
 
 import Ipopt
 import LinearAlgebra
+import MathOptSymbolicAD
 import PowerModels
 import Random
 import SparseArrays
-import MathOptSymbolicAD
+import SpecialFunctions
 import Test
 
 function runtests()
@@ -340,7 +341,11 @@ function test_user_defined_functions_expr()
     @variable(model, 0.5 <= x <= 1.0)
     @operator(model, mysin, 1, a -> sin(a))
     @operator(model, pow, 2, (a, b) -> a^b)
-    @objective(model, Max, mysin(x) + log(x) + dawson(x) - pow(x, 2))
+    @objective(
+        model,
+        Max,
+        mysin(x) + log(x) + SpecialFunctions.dawson(x) - pow(x, 2),
+    )
     set_attribute(
         model,
         MOI.AutomaticDifferentiationBackend(),
