@@ -70,3 +70,8 @@ large number of unique constraints in the model (which would require a lot of
 expressions to be symbolically differentiated), or if the nonlinear functions
 contain a large number of nonlinear terms (which would make the symbolic
 derivative expensive to compute).
+
+## License
+
+This software is provided under a BSD license as part of the Grid Optimization
+Competition Solvers project, C19076. See LICENSE.md.
