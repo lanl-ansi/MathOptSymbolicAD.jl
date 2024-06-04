@@ -173,7 +173,7 @@ Parse `expr` into `f` and return a `_Node`.
     This function gets called recursively.
 """
 function _Node(f::_Function, expr::Expr)
-    @assert isexpr(expr, :call)
+    @assert Meta.isexpr(expr, :call)
     # Performance optimization: most calls will be unary or binary
     # operators. Therefore, we can specialize an if-statement to handle the
     # common cases without needing to splat.
