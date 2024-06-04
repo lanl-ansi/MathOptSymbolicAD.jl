@@ -5,12 +5,9 @@
 
 module MathOptSymbolicAD
 
-import Base.Meta: isexpr
-import MathOptInterface
+import MathOptInterface as MOI
 import SparseArrays
 import Symbolics
-
-const MOI = MathOptInterface
 
 abstract type AbstractSymbolicBackend <:
               MOI.Nonlinear.AbstractAutomaticDifferentiation end
