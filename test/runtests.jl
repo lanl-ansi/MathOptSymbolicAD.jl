@@ -422,6 +422,9 @@ function test_constant_subexpressions_expr()
 end
 
 function test_logic_comparison_expr()
+    if VERSION < v"1.7"
+        return  # Symbolics doesn't support Base.ifelse in Julia v1.6
+    end
     model = Model(Ipopt.Optimizer)
     @variable(model, -1 <= x <= 1)
     @objective(model, Max, ifelse(-0.5 <= x && x <= 0.5, 1 - x^2, 0))
