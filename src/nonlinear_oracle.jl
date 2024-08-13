@@ -173,6 +173,9 @@ Parse `expr` into `f` and return a `_Node`.
     This function gets called recursively.
 """
 function _Node(f::_Function, expr::Expr)
+    if Meta.isexpr(expr, :||) || Meta.isexpr(expr, :&&)
+        return _Node(f, expr.head, (_Node(f, arg) for arg in expr.args)...)
+    end
     @assert Meta.isexpr(expr, :call)
     # Performance optimization: most calls will be unary or binary
     # operators. Therefore, we can specialize an if-statement to handle the
@@ -219,6 +222,10 @@ function _expr_to_symbolics(model::MOI.Nonlinear.Model, expr::_Node, p, x)
         args = [_expr_to_symbolics(model, c, p, x) for c in expr.children]
         if hasproperty(Base, expr.operation)
             return getproperty(Base, expr.operation)(args...)
+        elseif expr.operation == :&&
+            return (&)(args...)
+        elseif expr.operation == :||
+            return (|)(args...)
         end
         # If the function isn't defined in Base, defer to the operator registry.
         # We don't do this for all functions, because MOI uses NaNMath, which
@@ -518,6 +525,10 @@ function _to_expr(
             MOI.VariableIndex(variable_order[node.index])
         elseif node.type == MOI.Nonlinear.NODE_PARAMETER
             data.parameters[node.index]
+        elseif node.type == MOI.Nonlinear.NODE_LOGIC
+            Expr(data.operators.logic_operators[node.index])
+        elseif node.type == MOI.Nonlinear.NODE_COMPARISON
+            Expr(:call, data.operators.comparison_operators[node.index])
         else
             @assert node.type == MOI.Nonlinear.NODE_VALUE
             expr.values[node.index]
