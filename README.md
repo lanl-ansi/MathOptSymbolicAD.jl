@@ -37,6 +37,8 @@ To use MathOptSymbolicAD.jl with JuMP, set the
  * `MathOptSymbolicAD.ThreadedBackend()`: a variation of `DefaultBackend` that
    additionally uses multithreading to compute the Jacobian and Hessian
    callbacks
+ * `MathOptSymbolicAD.SybolicAD.SymbolicMode()`: a custom backend that depends
+   only on MathOptInterface. This backend supports multithreading.
 
 ```julia
 using JuMP
@@ -47,8 +49,10 @@ set_attribute(
     model,
     MOI.AutomaticDifferentiationBackend(),
     MathOptSymbolicAD.DefaultBackend(),
-    # or ...
+    # ... or ...
     # MathOptSymbolicAD.ThreadedBackend(),
+    # ... or ...
+    # MathOptSymbolicAD.SymbolicAD.SymbolicMode(),
 )
 @variable(model, x[1:2])
 @objective(model, Min, (1 - x[1])^2 + 100 * (x[2] - x[1]^2)^2)
