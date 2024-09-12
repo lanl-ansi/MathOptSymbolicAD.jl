@@ -169,9 +169,10 @@ end
 
 function _run_solution_benchmark(model, optimizer, backend)
     set_optimizer(model, optimizer)
-    optimize!(model; _differentiation_backend = backend)
+    set_attribute(model, MOI.AutomaticDifferentiationBackend(), backend)
+    optimize!(model)
     println("Timing statistics")
-    nlp_block = MOI.get(model, MOI.NLPBlock())
+    nlp_block = MOI.get(unsafe_backend(model), MOI.NLPBlock())
     println(" - ", nlp_block.evaluator.eval_constraint_timer)
     println(" - ", nlp_block.evaluator.eval_constraint_jacobian_timer)
     println(" - ", nlp_block.evaluator.eval_hessian_lagrangian_timer)
@@ -218,12 +219,6 @@ function power_model(case::String)
     return pm.model
 end
 
-function test_case5_pjm_unit()
-    model = power_model("pglib_opf_case5_pjm.m")
-    run_unit_benchmark(model)
-    return
-end
-
 function test_case5_pjm_solution()
     model = power_model("pglib_opf_case5_pjm.m")
     run_solution_benchmark(model, Ipopt.Optimizer)
@@ -254,10 +249,12 @@ function test_optimizer_clnlbeam(; N::Int = 10)
         @NLconstraint(model, x[i+1] - x[i] == h / 2 * (sin(t[i+1]) + sin(t[i])))
         @constraint(model, t[i+1] - t[i] == h / 2 * (u[i+1] - u[i]))
     end
-    optimize!(
-        model;
-        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
+    set_attribute(
+        model,
+        MOI.AutomaticDifferentiationBackend(),
+        MathOptSymbolicAD.DefaultBackend(),
     )
+    optimize!(model)
     Test.@test isapprox(objective_value(model), 350; atol = 1e-6)
     t_sol = value.(t)
     u_sol = value.(u)
@@ -313,10 +310,12 @@ end
 function test_optimizer_case5_pjm()
     model = power_model("pglib_opf_case5_pjm.m")
     set_optimizer(model, Ipopt.Optimizer)
-    optimize!(
-        model;
-        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
+    set_attribute(
+        model,
+        MOI.AutomaticDifferentiationBackend(),
+        MathOptSymbolicAD.DefaultBackend(),
     )
+    optimize!(model)
     symbolic_obj = objective_value(model)
     optimize!(model)
     Test.@test isapprox(objective_value(model), symbolic_obj, atol = 1e-6)
@@ -329,10 +328,12 @@ function test_user_defined_functions()
     register(model, :mysin, 1, a -> sin(a); autodiff = true)
     register(model, :pow, 2, (a, b) -> a^b; autodiff = true)
     @NLobjective(model, Max, mysin(x) + log(x) + dawson(x) - pow(x, 2))
-    optimize!(
-        model;
-        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
+    set_attribute(
+        model,
+        MOI.AutomaticDifferentiationBackend(),
+        MathOptSymbolicAD.DefaultBackend(),
     )
+    optimize!(model)
     Test.@test termination_status(model) == LOCALLY_SOLVED
     return
 end
@@ -363,10 +364,12 @@ function test_nested_subexpressions()
     @NLexpression(model, my_expr1, x - 1)
     @NLexpression(model, my_expr2, my_expr1^2)
     @NLobjective(model, Min, my_expr2)
-    optimize!(
-        model;
-        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
+    set_attribute(
+        model,
+        MOI.AutomaticDifferentiationBackend(),
+        MathOptSymbolicAD.DefaultBackend(),
     )
+    optimize!(model)
     Test.@test termination_status(model) == LOCALLY_SOLVED
     Test.@test ≈(value(x), 1.0; atol = 1e-3)
     return
@@ -395,10 +398,12 @@ function test_constant_subexpressions()
     @NLexpression(model, my_expr1, 1.0)
     @NLexpression(model, my_expr2, x)
     @NLobjective(model, Min, (my_expr2 - my_expr1)^2)
-    optimize!(
-        model;
-        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
+    set_attribute(
+        model,
+        MOI.AutomaticDifferentiationBackend(),
+        MathOptSymbolicAD.DefaultBackend(),
     )
+    optimize!(model)
     Test.@test termination_status(model) == LOCALLY_SOLVED
     Test.@test ≈(value(x), 1.0; atol = 1e-3)
     return
