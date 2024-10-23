@@ -1,32 +1,49 @@
-# MathOptSymbolicAD
+# MathOptSymbolicAD.jl
 
-This package implements an experimental symbolic automatic differentiation
-backend for JuMP.
+[![Build Status](https://github.com/lanl-ansi/MathOptSymbolicAD.jl/workflows/CI/badge.svg)](https://github.com/lanl-ansi/MathOptSymbolicAD.jl/actions?query=workflow%3ACI)
+[![codecov](https://codecov.io/gh/lanl-ansi/MathOptSymbolicAD.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/lanl-ansi/MathOptSymbolicAD.jl)
 
-For more details, see Oscar's [JuMP-dev 2022 talk](https://www.youtube.com/watch?v=d_X3gj3Iz-k).
+[MathOptSymbolicAD.jl](https://github.com/lanl-ansi/MathOptSymbolicAD.jl) is a Julia
+package that implements a symbolic automatic differentiation backend for JuMP.
+
+## License
+
+MathOptSymbolicAD.jl is provided under a BSD-3 license as part of the Grid Optimization
+Competition Solvers project, C19076.
+
+See [LICENSE.md](https://github.com/lanl-ansi/MathOptSymbolicAD.jl/blob/master/LICENSE.md)
+for details.
 
 ## Installation
 
-Install MathOptSymbolicAD as follows:
+Install `MathOptSymbolicAD.jl` using the Julia package manager:
 ```julia
 import Pkg
 Pkg.add("MathOptSymbolicAD")
 ```
 
+## Getting help
+
+For help, questions, comments, and suggestions, please
+[open a GitHub issue](https://github.com/lanl-ansi/MathOptSymbolicAD.jl/issues/new).
+
 ## Use with JuMP
+
+To use MathOptSymbolicAD.jl with JuMP, set the `MOI.AutomaticDifferentiationBackend()`
+attribute to `MathOptSymbolicAD.DefaultBackend()`:
 
 ```julia
 using JuMP
 import Ipopt
 import MathOptSymbolicAD
 model = Model(Ipopt.Optimizer)
-@variable(model, x[1:2])
-@objective(model, Min, (1 - x[1])^2 + 100 * (x[2] - x[1]^2)^2)
 set_attribute(
     model,
     MOI.AutomaticDifferentiationBackend(),
     MathOptSymbolicAD.DefaultBackend(),
 )
+@variable(model, x[1:2])
+@objective(model, Min, (1 - x[1])^2 + 100 * (x[2] - x[1]^2)^2)
 optimize!(model)
 ```
 
@@ -71,7 +88,5 @@ expressions to be symbolically differentiated), or if the nonlinear functions
 contain a large number of nonlinear terms (which would make the symbolic
 derivative expensive to compute).
 
-## License
-
-This software is provided under a BSD license as part of the Grid Optimization
-Competition Solvers project, C19076. See LICENSE.md.
+For more details, see Oscar's [JuMP-dev 2022 talk](https://www.youtube.com/watch?v=d_X3gj3Iz-k),
+although note that the syntax has changed since the original recording.
