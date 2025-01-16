@@ -567,3 +567,21 @@ function gradient(f::MOI.AbstractScalarFunction)
     end
     return ret
 end
+
+function gradient_and_hessian(f::MOI.AbstractScalarFunction)
+    x = variables(f)
+    ∇f, H, ∇²f = Any[], Tuple{Int,Int}[], Any[]
+    for (i, xi) in enumerate(x)
+        ∇fi = simplify(derivative(f, xi))
+        push!(∇f, ∇fi)
+        for xj in variables(∇fi)
+            j = findfirst(==(xj), x)
+            if i > j
+                continue  # Don't need lower triangle
+            end
+            push!(∇²f, simplify(derivative(∇fi, xj)))
+            push!(H, (i, j))
+        end
+    end
+    return x, ∇f, H, ∇²f
+end
