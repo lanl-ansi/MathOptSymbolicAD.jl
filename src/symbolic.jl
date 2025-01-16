@@ -197,23 +197,34 @@ end
 """
     simplify(f)
 
-Return a simplified version of the function `f`.
+Return a simplified copy of the function `f`.
 
 !!! warning
     This function is not type stable by design.
 """
-simplify(f) = f
+simplify(f) = simplify!(copy(f))
 
-function simplify(f::MOI.ScalarAffineFunction{T}) where {T}
-    f = MOI.Utilities.canonical(f)
+"""
+    simplify!(f)
+
+Simplify the function `f` in-place and return either the function `f` or a
+new object if `f` can be represented in a simpler type.
+
+!!! warning
+    This function is not type stable by design.
+"""
+simplify!(f) = f
+
+function simplify!(f::MOI.ScalarAffineFunction{T}) where {T}
+    f = MOI.Utilities.canonicalize!(f)
     if isempty(f.terms)
         return f.constant
     end
     return f
 end
 
-function simplify(f::MOI.ScalarQuadraticFunction{T}) where {T}
-    f = MOI.Utilities.canonical(f)
+function simplify!(f::MOI.ScalarQuadraticFunction{T}) where {T}
+    f = MOI.Utilities.canonicalize!(f)
     if isempty(f.quadratic_terms)
         if isempty(f.affine_terms)
             return f.constant
@@ -223,13 +234,7 @@ function simplify(f::MOI.ScalarQuadraticFunction{T}) where {T}
     return f
 end
 
-# function simplify(f::MOI.ScalarNonlinearFunction)
-#     for i in 1:length(f.args)
-#         f.args[i] = simplify(f.args[i])
-#     end
-#     return _eval_if_constant(simplify(Val(f.head), f))
-# end
-function simplify(f::MOI.ScalarNonlinearFunction)
+function simplify!(f::MOI.ScalarNonlinearFunction)
     stack, result_stack = Any[f], Any[]
     while !isempty(stack)
         arg = pop!(stack)
@@ -243,11 +248,12 @@ function simplify(f::MOI.ScalarNonlinearFunction)
                 push!(stack, child)
             end
         elseif arg isa Tuple{<:MOI.ScalarNonlinearFunction}
-            f_expr = only(arg)
-            args = Any[pop!(result_stack) for _ in 1:length(f_expr.args)]
-            result = MOI.ScalarNonlinearFunction(f_expr.head, args)
-            # simplify(::Val, ::Any) does not use recursion so this is safe.
-            result = simplify(Val(result.head), result)
+            result = only(arg)
+            for i in 1:length(result.args)
+                result.args[i] = pop!(result_stack)
+            end
+            # simplify!(::Val, ::Any) does not use recursion so this is safe.
+            result = simplify!(Val(result.head), result)
             result = _eval_if_constant(result)
             push!(result_stack, result)
         else
@@ -257,16 +263,16 @@ function simplify(f::MOI.ScalarNonlinearFunction)
     return only(result_stack)
 end
 
-function simplify(f::MOI.VectorAffineFunction{T}) where {T}
-    f = MOI.Utilities.canonical(f)
+function simplify!(f::MOI.VectorAffineFunction{T}) where {T}
+    f = MOI.Utilities.canonicalize!(f)
     if isempty(f.terms)
         return f.constants
     end
     return f
 end
 
-function simplify(f::MOI.VectorQuadraticFunction{T}) where {T}
-    f = MOI.Utilities.canonical(f)
+function simplify!(f::MOI.VectorQuadraticFunction{T}) where {T}
+    f = MOI.Utilities.canonicalize!(f)
     if isempty(f.quadratic_terms)
         if isempty(f.affine_terms)
             return f.constants
@@ -276,12 +282,15 @@ function simplify(f::MOI.VectorQuadraticFunction{T}) where {T}
     return f
 end
 
-function simplify(f::MOI.VectorNonlinearFunction)
-    return MOI.VectorNonlinearFunction(simplify.(f.rows))
+function simplify!(f::MOI.VectorNonlinearFunction)
+    for (i, row) in enumerate(f.rows)
+        f.rows[i] = simplify!(row)
+    end
+    return f
 end
 
 # If a ScalarNonlinearFunction has only constant arguments, we should return
-# the vaålue.
+# the value.
 
 _isnum(::Any) = false
 
@@ -315,20 +324,24 @@ function _isexpr(f::MOI.ScalarNonlinearFunction, head::Symbol, n::Int)
 end
 
 """
-    simplify(::Val{head}, f::MOI.ScalarNonlinearFunction)
+    simplify!(::Val{head}, f::MOI.ScalarNonlinearFunction)
 
 Return a simplified version of `f` where the head of `f` is `head`.
 
+## Why
+
 Implementing this method enables custom simplification rules for different
 operators without needing a giant switch statement.
+
+## Note
 
 It is important that this function does not recursively call `simplify`. Deal
 only with the immediate operator. The children arguments will already be
 simplified.
 """
-simplify(::Val, f::MOI.ScalarNonlinearFunction) = f
+simplify!(::Val, f::MOI.ScalarNonlinearFunction) = f
 
-function simplify(::Val{:*}, f::MOI.ScalarNonlinearFunction)
+function simplify!(::Val{:*}, f::MOI.ScalarNonlinearFunction)
     new_args = Any[]
     first_constant = 0
     for arg in f.args
@@ -360,7 +373,7 @@ function simplify(::Val{:*}, f::MOI.ScalarNonlinearFunction)
     return MOI.ScalarNonlinearFunction(:*, new_args)
 end
 
-function simplify(::Val{:+}, f::MOI.ScalarNonlinearFunction)
+function simplify!(::Val{:+}, f::MOI.ScalarNonlinearFunction)
     if length(f.args) == 1
         # +(x) -> x
         return only(f.args)
@@ -401,7 +414,7 @@ function simplify(::Val{:+}, f::MOI.ScalarNonlinearFunction)
     return MOI.ScalarNonlinearFunction(:+, new_args)
 end
 
-function simplify(::Val{:-}, f::MOI.ScalarNonlinearFunction)
+function simplify!(::Val{:-}, f::MOI.ScalarNonlinearFunction)
     if length(f.args) == 1
         if _isexpr(f.args[1], :-, 1)
             # -(-(x)) => x
@@ -428,7 +441,7 @@ function simplify(::Val{:-}, f::MOI.ScalarNonlinearFunction)
     return f
 end
 
-function simplify(::Val{:^}, f::MOI.ScalarNonlinearFunction)
+function simplify!(::Val{:^}, f::MOI.ScalarNonlinearFunction)
     if _iszero(f.args[2])
         # x^0 => 1
         return true

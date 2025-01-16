@@ -190,6 +190,12 @@ function test_simplify()
             @show g
         end
         @test g ≈ moi_function(fp)
+        g = MathOptSymbolicAD.simplify!(moi_function(f))
+        if !(g ≈ moi_function(fp))
+            @show f
+            @show g
+        end
+        @test g ≈ moi_function(fp)
     end
     return
 end
@@ -229,7 +235,7 @@ function test_variable()
     return
 end
 
-function test_simplify()
+function test_simplify_VariableIndex()
     x = MOI.VariableIndex(1)
     @test MathOptSymbolicAD.simplify(x) === x
     @test MathOptSymbolicAD.simplify(1.0) === 1.0
@@ -491,6 +497,24 @@ function test_simplify_deep()
         f = MOI.ScalarNonlinearFunction(:+, Any[f, g])
     end
     @test ≈(MathOptSymbolicAD.simplify(f), MOI.ScalarNonlinearFunction(:+, x))
+    return
+end
+
+function test_simplify_shared()
+    x = MOI.VariableIndex(1)
+    f = MOI.ScalarNonlinearFunction(:^, Any[x, 1])
+    g = MOI.ScalarNonlinearFunction(:+, Any[f, f])
+    h = MOI.ScalarNonlinearFunction(:-, Any[g, g])
+    @test ≈(
+        MathOptSymbolicAD.simplify(h),
+        MOI.ScalarNonlinearFunction(
+            :-,
+            Any[
+                MOI.ScalarNonlinearFunction(:+, Any[x, x]),
+                MOI.ScalarNonlinearFunction(:+, Any[x, x]),
+            ],
+        )
+    )
     return
 end
 
