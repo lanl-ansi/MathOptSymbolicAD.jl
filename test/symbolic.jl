@@ -513,7 +513,7 @@ function test_simplify_shared()
                 MOI.ScalarNonlinearFunction(:+, Any[x, x]),
                 MOI.ScalarNonlinearFunction(:+, Any[x, x]),
             ],
-        )
+        ),
     )
     return
 end
