@@ -73,13 +73,14 @@ function test_derivative()
         @force_nonlinear(*(y, x, z))=>@force_nonlinear(*(y, z)),
         @force_nonlinear(*(y, z, x))=>@force_nonlinear(*(y, z)),
         # :^
-        sin(x)^2=>@force_nonlinear(*(2.0, sin(x), cos(x))),
+        sin(x)^2=>@force_nonlinear(*(cos(x), 2.0, sin(x))),
         sin(x)^1=>cos(x),
         # :/
         @force_nonlinear(/(x, 2))=>0.5,
         @force_nonlinear(
             x^2 / (x + 1)
-        )=>@force_nonlinear((*(2, x, x + 1) - x^2) / (x + 1)^2),
+        )=>@force_nonlinear((*(x + 1, 2, x) - x^2) / (x + 1)^2),
+        # )=>@force_nonlinear((*(2, x, x + 1) - x^2) / (x + 1)^2),
         # :ifelse
         op_ifelse(z, x^2, x)=>op_ifelse(z, 2x, 1),
         # :atan
@@ -99,6 +100,7 @@ function test_derivative()
         if !(h ≈ moi_function(fp))
             @show h
             @show f
+            @show g
         end
         @test h ≈ moi_function(fp)
     end
@@ -227,6 +229,241 @@ function test_variable()
     end
     return
 end
+
+function test_simplify()
+    x = MOI.VariableIndex(1)
+    @test MathOptSymbolicAD.simplify(x) === x
+    @test MathOptSymbolicAD.simplify(1.0) === 1.0
+    return
+end
+
+function test_simplify_ScalarAffineFunction()
+    f = zero(MOI.ScalarAffineFunction{Float64})
+    @test MathOptSymbolicAD.simplify(f) == 0.0
+    f = MOI.ScalarAffineFunction{Float64}(MOI.ScalarAffineTerm{Float64}[], 2.0)
+    @test MathOptSymbolicAD.simplify(f) == 2.0
+    x = MOI.VariableIndex(1)
+    @test MathOptSymbolicAD.simplify(1.0 * x + 1.0) ≈ 1.0 * x + 1.0
+    @test MathOptSymbolicAD.simplify(1.0 * x + 2.0 * x + 1.0) ≈ 3.0 * x + 1.0
+    return
+end
+
+function test_simplify_ScalarQuadraticFunction()
+    x = MOI.VariableIndex(1)
+    f = MOI.ScalarQuadraticFunction(
+        MOI.ScalarQuadraticTerm{Float64}[],
+        [MOI.ScalarAffineTerm{Float64}(1.0, x)],
+        1.0,
+    )
+    @test MathOptSymbolicAD.simplify(f) ≈ 1.0 * x + 1.0
+    @test MathOptSymbolicAD.simplify(1.0 * x * x + 1.0) ≈ 1.0 * x * x + 1.0
+    g = 1.0 * x * x + 2.0 * x * x + 1.0
+    @test MathOptSymbolicAD.simplify(g) ≈ 3.0 * x * x + 1.0
+    return
+end
+
+function test_simplify_ScalarNonlinearFunction()
+    x = MOI.VariableIndex(1)
+    # sin(3 * (x^0)) -> sin(3)
+    f = MOI.ScalarNonlinearFunction(:^, Any[x, 0])
+    g = MOI.ScalarNonlinearFunction(:*, Any[3, f])
+    h = MOI.ScalarNonlinearFunction(:sin, Any[g])
+    @test MathOptSymbolicAD.simplify(h) ≈ sin(3)
+    # sin(log(x)) -> sin(log(x))
+    f = MOI.ScalarNonlinearFunction(:log, Any[x])
+    g = MOI.ScalarNonlinearFunction(:sin, Any[f])
+    @test MathOptSymbolicAD.simplify(g) ≈ g
+    return
+end
+
+# simplify(::Val{:*}, f::MOI.ScalarNonlinearFunction)
+function test_simplify_ScalarNonlinearFunction_multiplication()
+    x, y, z = MOI.VariableIndex.(1:3)
+    # *(x, *(y, z)) -> *(x, y, z)
+    @test ≈(
+        MathOptSymbolicAD.simplify(
+            MOI.ScalarNonlinearFunction(
+                :*,
+                Any[x, MOI.ScalarNonlinearFunction(:*, Any[y, z])],
+            ),
+        ),
+        MOI.ScalarNonlinearFunction(:*, Any[x, y, z]),
+    )
+    # *(x, *(y, z, *(x, 2))) -> *(x, y, z, x, 2)
+    f = MOI.ScalarNonlinearFunction(:*, Any[x, 2])
+    @test ≈(
+        MathOptSymbolicAD.simplify(
+            MOI.ScalarNonlinearFunction(
+                :*,
+                Any[x, MOI.ScalarNonlinearFunction(:*, Any[y, z, f])],
+            ),
+        ),
+        MOI.ScalarNonlinearFunction(:*, Any[x, y, z, x, 2]),
+    )
+    # *(x, 3, 2) -> *(x, 6)
+    @test ≈(
+        MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:*, Any[x, 3, 2])),
+        MOI.ScalarNonlinearFunction(:*, Any[x, 6]),
+    )
+    # *(3, x, 2) -> *(6, x)
+    @test ≈(
+        MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:*, Any[3, x, 2])),
+        MOI.ScalarNonlinearFunction(:*, Any[6, x]),
+    )
+    # *(x, 1) -> x
+    @test ≈(MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:*, Any[x, 1])), x)
+    # *(x, 0) -> 0
+    @test ≈(MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:*, Any[x, 0])), 0)
+    # *(-(x, x), 1) -> 0
+    f = MOI.ScalarNonlinearFunction(:-, Any[x, x])
+    @test ≈(MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:*, Any[f, 1])), 0)
+    # *() -> true
+    @test ≈(MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:*, Any[])), 1)
+    return
+end
+
+# simplify(::Val{:+}, f::MOI.ScalarNonlinearFunction)
+function test_simplify_ScalarNonlinearFunction_addition()
+    x, y, z = MOI.VariableIndex.(1:3)
+    # (+(x, +(y, z)))=>(+(x, y, z)),
+    @test ≈(
+        MathOptSymbolicAD.simplify(
+            MOI.ScalarNonlinearFunction(
+                :+,
+                Any[x, MOI.ScalarNonlinearFunction(:+, Any[y, z])],
+            ),
+        ),
+        MOI.ScalarNonlinearFunction(:+, Any[x, y, z]),
+    )
+    # +(sin(x), -cos(x))=>sin(x)-cos(x),
+    sinx = MOI.ScalarNonlinearFunction(:sin, Any[x])
+    cosx = MOI.ScalarNonlinearFunction(:cos, Any[x])
+    @test ≈(
+        MathOptSymbolicAD.simplify(
+            MOI.ScalarNonlinearFunction(
+                :+,
+                Any[sinx, MOI.ScalarNonlinearFunction(:-, Any[cosx])],
+            ),
+        ),
+        MOI.ScalarNonlinearFunction(:-, Any[sinx, cosx]),
+    )
+    # (+(x, 1, 2))=>(+(x, 3)),
+    @test ≈(
+        MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:+, Any[x, 1, 2])),
+        MOI.ScalarNonlinearFunction(:+, Any[x, 3]),
+    )
+    # (+(1, x, 2))=>(+(3, x)),
+    @test ≈(
+        MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:+, Any[1, x, 2])),
+        MOI.ScalarNonlinearFunction(:+, Any[3, x]),
+    )
+    # +(x, 0) -> x
+    @test MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:+, Any[x, 0])) ≈ x
+    # +(0, x) -> x
+    @test MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:+, Any[0, x])) ≈ x
+    # +(-(x, x), 0) -> 0
+    f = MOI.ScalarNonlinearFunction(
+        :+,
+        Any[MOI.ScalarNonlinearFunction(:-, Any[x, x]), 0],
+    )
+    @test MathOptSymbolicAD.simplify(f) === false
+    return
+end
+
+# simplify(::Val{:-}, f::MOI.ScalarNonlinearFunction)
+function test_simplify_ScalarNonlinearFunction_subtraction()
+    x, y = MOI.VariableIndex(1), MOI.VariableIndex(2)
+    f = MOI.ScalarNonlinearFunction(:-, Any[x])
+    # -x -> -x
+    @test MathOptSymbolicAD.simplify(f) ≈ f
+    # -(-(x)) -> x
+    @test MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:-, Any[f])) ≈ x
+    # -(x, 0) -> x
+    @test MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:-, Any[x, 0])) ≈ x
+    # -(0, x) -> -x
+    @test MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:-, Any[0, x])) ≈ f
+    # -(x, x) -> 0
+    @test MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:-, Any[x, x])) ≈ 0
+    # -(x, -y) -> +(x, y)
+    f = MOI.ScalarNonlinearFunction(
+        :-,
+        Any[x, MOI.ScalarNonlinearFunction(:-, Any[y])],
+    )
+    @test MathOptSymbolicAD.simplify(f) ≈ MOI.ScalarNonlinearFunction(:+, Any[x, y])
+    # -(x, y) -> -(x, y)
+    f = MOI.ScalarNonlinearFunction(:-, Any[x, y])
+    @test MathOptSymbolicAD.simplify(f) ≈ f
+    return
+end
+
+# simplify(::Val{:^}, f::MOI.ScalarNonlinearFunction)
+function test_simplify_ScalarNonlinearFunction_power()
+    x, y = MOI.VariableIndex(1), MOI.VariableIndex(2)
+    # x^0 -> 1
+    @test MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:^, Any[x, 0])) == 1
+    # x^1 -> x
+    @test MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:^, Any[x, 1])) == x
+    # 0^x -> 0
+    @test MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:^, Any[0, x])) == 0
+    # 1^x -> 1
+    @test MathOptSymbolicAD.simplify(MOI.ScalarNonlinearFunction(:^, Any[1, x])) == 1
+    # x^y -> x^y
+    f = MOI.ScalarNonlinearFunction(:^, Any[x, y])
+    @test MathOptSymbolicAD.simplify(f) ≈ f
+    return
+end
+
+function test_simplify_VectorAffineFunction()
+    f = MOI.VectorAffineFunction{Float64}(
+        MOI.VectorAffineTerm{Float64}[],
+        [0.0, 1.0, 2.0],
+    )
+    @test MathOptSymbolicAD.simplify(f) == [0.0, 1.0, 2.0]
+    x = MOI.VariableIndex(1)
+    f = MOI.Utilities.operate(vcat, Float64, 1.0, x, 2.0 * x + 1.0 * x)
+    @test MathOptSymbolicAD.simplify(f) ≈ f
+    return
+end
+
+function test_simplify_VectorQuadraticFunction()
+    f = MOI.VectorQuadraticFunction{Float64}(
+        MOI.VectorQuadraticTerm{Float64}[],
+        MOI.VectorAffineTerm{Float64}[],
+        [0.0, 1.0, 2.0],
+    )
+    @test MathOptSymbolicAD.simplify(f) == [0.0, 1.0, 2.0]
+    x = MOI.VariableIndex(1)
+    f = MOI.VectorQuadraticFunction{Float64}(
+        MOI.VectorQuadraticTerm{Float64}[],
+        [MOI.VectorAffineTerm{Float64}(2, MOI.ScalarAffineTerm(3.0, x))],
+        [1.0, 0.0],
+    )
+    g = MOI.Utilities.operate(vcat, Float64, 1.0, 3.0 * x)
+    @test MathOptSymbolicAD.simplify(f) ≈ g
+    f = MOI.Utilities.operate(vcat, Float64, 1.0, 2.0 * x * x)
+    @test MathOptSymbolicAD.simplify(f) ≈ f
+    return
+end
+
+function test_simplify_VectorNonlinearFunction()
+    x = MOI.VariableIndex.(1:3)
+    y = MOI.ScalarNonlinearFunction(
+        :+,
+        Any[MOI.ScalarNonlinearFunction(:^, Any[xi, 2]) for xi in x],
+    )
+    x_plus = [MOI.ScalarNonlinearFunction(:+, Any[xi]) for xi in x]
+    function wrap(f)
+        return MOI.ScalarNonlinearFunction(
+            :+,
+            Any[MOI.ScalarNonlinearFunction(:-, Any[f, 0.0]), 0.0],
+        )
+    end
+    f = MOI.VectorNonlinearFunction(wrap.([y; x_plus]))
+    g = MOI.VectorNonlinearFunction([y; x_plus])
+    @test MathOptSymbolicAD.simplify(f) ≈ g
+    return
+end
+
 
 end  # module
 
