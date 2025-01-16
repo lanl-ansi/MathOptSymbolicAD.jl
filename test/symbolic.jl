@@ -73,14 +73,13 @@ function test_derivative()
         @force_nonlinear(*(y, x, z))=>@force_nonlinear(*(y, z)),
         @force_nonlinear(*(y, z, x))=>@force_nonlinear(*(y, z)),
         # :^
-        sin(x)^2=>@force_nonlinear(*(cos(x), 2.0, sin(x))),
+        sin(x)^2=>@force_nonlinear(*(2.0, sin(x), cos(x))),
         sin(x)^1=>cos(x),
         # :/
         @force_nonlinear(/(x, 2))=>0.5,
         @force_nonlinear(
             x^2 / (x + 1)
-        )=>@force_nonlinear((*(x + 1, 2, x) - x^2) / (x + 1)^2),
-        # )=>@force_nonlinear((*(2, x, x + 1) - x^2) / (x + 1)^2),
+        )=>@force_nonlinear((*(2, x, x + 1) - x^2) / (x + 1)^2),
         # :ifelse
         op_ifelse(z, x^2, x)=>op_ifelse(z, 2x, 1),
         # :atan
@@ -464,6 +463,17 @@ function test_simplify_VectorNonlinearFunction()
     return
 end
 
+function test_simplify_deep()
+    N = 10_000
+    x = MOI.VariableIndex.(1:N)
+    f = MOI.ScalarNonlinearFunction(:^, Any[x[1], 1])
+    for i in 2:N
+        g = MOI.ScalarNonlinearFunction(:^, Any[x[i], 1])
+        f = MOI.ScalarNonlinearFunction(:+, Any[f, g])
+    end
+    @test ≈(MathOptSymbolicAD.simplify(f), MOI.ScalarNonlinearFunction(:+, x))
+    return
+end
 
 end  # module
 

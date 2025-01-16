@@ -194,6 +194,14 @@ function derivative(f::MOI.ScalarNonlinearFunction, x::MOI.VariableIndex)
     return throw(err)
 end
 
+"""
+    simplify(f)
+
+Return a simplified version of the function `f`.
+
+!!! warning
+    This function is not type stable by design.
+"""
 simplify(f) = f
 
 function simplify(f::MOI.ScalarAffineFunction{T}) where {T}
@@ -207,10 +215,77 @@ end
 function simplify(f::MOI.ScalarQuadraticFunction{T}) where {T}
     f = MOI.Utilities.canonical(f)
     if isempty(f.quadratic_terms)
-        return simplify(MOI.ScalarAffineFunction(f.affine_terms, f.constant))
+        if isempty(f.affine_terms)
+            return f.constant
+        end
+        return MOI.ScalarAffineFunction(f.affine_terms, f.constant)
     end
     return f
 end
+
+# function simplify(f::MOI.ScalarNonlinearFunction)
+#     for i in 1:length(f.args)
+#         f.args[i] = simplify(f.args[i])
+#     end
+#     return _eval_if_constant(simplify(Val(f.head), f))
+# end
+function simplify(f::MOI.ScalarNonlinearFunction)
+    stack, result_stack = Any[f], Any[]
+    while !isempty(stack)
+        arg = pop!(stack)
+        if arg isa MOI.ScalarNonlinearFunction
+            # We need some sort of hint so that the next time we see this on the
+            # stack we evaluate it using the args in `result_stack`. One option
+            # would be a custom type. Or we can just wrap in (,) and then check
+            # for a Tuple, which isn't (curretly) a valid argument.
+            push!(stack, (arg,))
+            for child in arg.args
+                push!(stack, child)
+            end
+        elseif arg isa Tuple{<:MOI.ScalarNonlinearFunction}
+            f_expr = only(arg)
+            args = Any[pop!(result_stack) for _ in 1:length(f_expr.args)]
+            result = MOI.ScalarNonlinearFunction(f_expr.head, args)
+            # simplify(::Val, ::Any) does not use recursion so this is safe.
+            result = simplify(Val(result.head), result)
+            result = _eval_if_constant(result)
+            push!(result_stack, result)
+        else
+            push!(result_stack, arg)
+        end
+    end
+    return only(result_stack)
+end
+
+function simplify(f::MOI.VectorAffineFunction{T}) where {T}
+    f = MOI.Utilities.canonical(f)
+    if isempty(f.terms)
+        return f.constants
+    end
+    return f
+end
+
+function simplify(f::MOI.VectorQuadraticFunction{T}) where {T}
+    f = MOI.Utilities.canonical(f)
+    if isempty(f.quadratic_terms)
+        if isempty(f.affine_terms)
+            return f.constants
+        end
+        return MOI.VectorAffineFunction(f.affine_terms, f.constants)
+    end
+    return f
+end
+
+function simplify(f::MOI.VectorNonlinearFunction)
+    return MOI.VectorNonlinearFunction(simplify.(f.rows))
+end
+
+# If a ScalarNonlinearFunction has only constant arguments, we should return
+# the vaålue.
+
+_isnum(::Any) = false
+
+_isnum(::Union{Bool,Integer,Float64}) = true
 
 function _eval_if_constant(f::MOI.ScalarNonlinearFunction)
     if all(_isnum, f.args) && hasproperty(Base, f.head)
@@ -221,41 +296,52 @@ end
 
 _eval_if_constant(f) = f
 
-function simplify(f::MOI.ScalarNonlinearFunction)
-    for i in 1:length(f.args)
-        f.args[i] = simplify(f.args[i])
-    end
-    return _eval_if_constant(simplify(Val(f.head), f))
-end
+_iszero(x::Any) = _isnum(x) && iszero(x)
 
-simplify(::Val, f::MOI.ScalarNonlinearFunction) = f
+_isone(x::Any) = _isnum(x) && isone(x)
 
-_iszero(x::Union{Bool,Integer,Float64}) = iszero(x)
-_iszero(::Any) = false
+"""
+    _isexpr(f::Any, head::Symbol[, n::Int])
 
-_isone(x::Union{Bool,Integer,Float64}) = isone(x)
-_isone(::Any) = false
-
-_isnum(::Union{Bool,Integer,Float64}) = true
-_isnum(::Any) = false
-
+Return `true` if `f` is a `ScalarNonlinearFunction` with head `head` and, if
+specified, `n` arguments.
+"""
 _isexpr(::Any, ::Symbol, n::Int = 0) = false
+
 _isexpr(f::MOI.ScalarNonlinearFunction, head::Symbol) = f.head == head
+
 function _isexpr(f::MOI.ScalarNonlinearFunction, head::Symbol, n::Int)
     return _isexpr(f, head) && length(f.args) == n
 end
+
+"""
+    simplify(::Val{head}, f::MOI.ScalarNonlinearFunction)
+
+Return a simplified version of `f` where the head of `f` is `head`.
+
+Implementing this method enables custom simplification rules for different
+operators without needing a giant switch statement.
+
+It is important that this function does not recursively call `simplify`. Deal
+only with the immediate operator. The children arguments will already be
+simplified.
+"""
+simplify(::Val, f::MOI.ScalarNonlinearFunction) = f
 
 function simplify(::Val{:*}, f::MOI.ScalarNonlinearFunction)
     new_args = Any[]
     first_constant = 0
     for arg in f.args
         if _isexpr(arg, :*)
+            # If the child is a :*, lift its arguments to the parent
             append!(new_args, arg.args)
         elseif _iszero(arg)
+            # If any argument is zero, the entire expression must be false
             return false
         elseif _isone(arg)
-            # nothing
+            # Skip any arguments that are one
         elseif arg isa Real
+            # Collect all constant arguments into a single value
             if first_constant == 0
                 push!(new_args, arg)
                 first_constant = length(new_args)
@@ -276,8 +362,10 @@ end
 
 function simplify(::Val{:+}, f::MOI.ScalarNonlinearFunction)
     if length(f.args) == 1
+        # +(x) -> x
         return only(f.args)
     elseif length(f.args) == 2 && _isexpr(f.args[2], :-, 1)
+        # +(x, -y) -> -(x, y)
         return MOI.ScalarNonlinearFunction(
             :-,
             Any[f.args[1], f.args[2].args[1]],
@@ -287,10 +375,12 @@ function simplify(::Val{:+}, f::MOI.ScalarNonlinearFunction)
     first_constant = 0
     for arg in f.args
         if _isexpr(arg, :+)
+            # If a child is a :+, lift its arguments to the parent
             append!(new_args, arg.args)
         elseif _iszero(arg)
-            # nothing
+            # Skip any zero arguments
         elseif arg isa Real
+            # Collect all constant arguments into a single value
             if first_constant == 0
                 push!(new_args, arg)
                 first_constant = length(new_args)
@@ -302,8 +392,10 @@ function simplify(::Val{:+}, f::MOI.ScalarNonlinearFunction)
         end
     end
     if isempty(new_args)
+        # +() -> false
         return false
     elseif length(new_args) == 1
+        # +(x) -> x
         return only(new_args)
     end
     return MOI.ScalarNonlinearFunction(:+, new_args)
@@ -416,3 +508,16 @@ function gradient(f::MOI.AbstractScalarFunction)
         x => simplify(derivative(f, x)) for x in variables(f)
     )
 end
+
+struct Node
+end
+
+struct Tape
+    nodes::Vector{Node}
+    output::Vector{Float64}
+end
+
+function evaluate(f::Vector{Any}, x::Dict{MOI.VariableIndex,Float64})
+    return
+end
+
