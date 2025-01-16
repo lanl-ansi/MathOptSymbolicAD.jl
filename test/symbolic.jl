@@ -59,6 +59,10 @@ function test_derivative()
         )=>op_ifelse(op_greater_than_or_equal_to(sin(x), 0), 1, -1)*cos(x),
         #   f.head == :sign
         sign(x)=>false,
+        #   f.head == :deg2rad
+        deg2rad(x)=>deg2rad(1),
+        #   f.head == :rad2deg
+        rad2deg(x)=>rad2deg(1),
         # SYMBOLIC_UNIVARIATE_EXPRESSIONS
         sin(x)=>cos(x),
         cos(x)=>-sin(x),
@@ -75,6 +79,7 @@ function test_derivative()
         # :^
         sin(x)^2=>@force_nonlinear(*(2.0, sin(x), cos(x))),
         sin(x)^1=>cos(x),
+        x^x=>x*x^(x-1)+x^x*log(x),
         # :/
         @force_nonlinear(/(x, 2))=>0.5,
         @force_nonlinear(
@@ -103,6 +108,16 @@ function test_derivative()
         end
         @test h ≈ moi_function(fp)
     end
+    return
+end
+
+function test_derivative_error()
+    x = MOI.VariableIndex(1)
+    f = MOI.ScalarNonlinearFunction(:foo, Any[x])
+    @test_throws(
+        MOI.UnsupportedNonlinearOperator,
+        MathOptSymbolicAD.derivative(f, x),
+    )
     return
 end
 
@@ -229,6 +244,7 @@ function test_variable()
         sin(x)=>[x],
         sin(x + y)=>[x, y],
         sin(x)*cos(y)=>[x, y],
+        log(x)^2=>[x],
     ]
         @test MathOptSymbolicAD.variables(moi_function(f)) == index.(fp)
     end

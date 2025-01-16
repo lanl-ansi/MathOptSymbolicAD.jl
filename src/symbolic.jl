@@ -55,11 +55,9 @@ function _replace_expression(node::Expr, u)
     for i in 1:length(node.args)
         node.args[i] = _replace_expression(node.args[i], u)
     end
-    if Meta.isexpr(node, :call)
-        op, args = node.args[1], node.args[2:end]
-        return MOI.ScalarNonlinearFunction(op, args)
-    end
-    return u
+    @assert Meta.isexpr(node, :call)
+    op, args = node.args[1], node.args[2:end]
+    return MOI.ScalarNonlinearFunction(op, args)
 end
 
 _replace_expression(node::Any, u) = node
@@ -79,18 +77,23 @@ function derivative(f::MOI.ScalarNonlinearFunction, x::MOI.VariableIndex)
         elseif f.head == :-
             return MOI.ScalarNonlinearFunction(:-, Any[derivative(u, x)])
         elseif f.head == :abs
-            scale = MOI.ScalarNonlinearFunction(
+            df_du = MOI.ScalarNonlinearFunction(
                 :ifelse,
                 Any[MOI.ScalarNonlinearFunction(:>=, Any[u, 0]), 1, -1],
             )
-            return MOI.ScalarNonlinearFunction(:*, Any[scale, derivative(u, x)])
+            return MOI.ScalarNonlinearFunction(:*, Any[df_du, derivative(u, x)])
         elseif f.head == :sign
             return false
+        elseif f.head == :deg2rad
+            df_du = deg2rad(1)
+            return MOI.ScalarNonlinearFunction(:*, Any[df_du, derivative(u, x)])
+        elseif f.head == :rad2deg
+            df_du = rad2deg(1)
+            return MOI.ScalarNonlinearFunction(:*, Any[df_du, derivative(u, x)])
         end
         for (key, df, _) in MOI.Nonlinear.SYMBOLIC_UNIVARIATE_EXPRESSIONS
             if key == f.head
                 # The chain rule: d(f(g(x))) / dx = f'(g(x)) * g'(x)
-                u = only(f.args)
                 df_du = _replace_expression(copy(df), u)
                 du_dx = derivative(u, x)
                 return MOI.ScalarNonlinearFunction(:*, Any[df_du, du_dx])
@@ -116,21 +119,27 @@ function derivative(f::MOI.ScalarNonlinearFunction, x::MOI.VariableIndex)
         end
         return MOI.ScalarNonlinearFunction(:+, sum_terms)
     elseif f.head == :^
+        # d/dx(u^p) = p*u^(p-1)*(du/dx) + u^p*log(u)*(dp/dx))
         @assert length(f.args) == 2
         u, p = f.args
         du_dx = derivative(u, x)
         dp_dx = derivative(p, x)
-        if _iszero(dp_dx)
-            # p is constant and does not depend on x
-            df_du = MOI.ScalarNonlinearFunction(
-                :*,
-                Any[p, MOI.ScalarNonlinearFunction(:^, Any[u, p-1])],
-            )
-            du_dx = derivative(u, x)
-            return MOI.ScalarNonlinearFunction(:*, Any[df_du, du_dx])
-        else
-            # u(x)^p(x)
+        term_1 = MOI.ScalarNonlinearFunction(
+            :*,
+            Any[p, MOI.ScalarNonlinearFunction(:^, Any[u, p-1]), du_dx],
+        )
+        if _iszero(dp_dx)  # p is constant and does not depend on x
+            return term_1
         end
+        term_2 = MOI.ScalarNonlinearFunction(
+            :*,
+            Any[
+                MOI.ScalarNonlinearFunction(:^, Any[u, p]),
+                MOI.ScalarNonlinearFunction(:log, Any[u]),
+                dp_dx,
+            ],
+        )
+        return MOI.ScalarNonlinearFunction(:+, Any[term_1, term_2])
     elseif f.head == :/
         # Quotient rule: d/dx(u / v) = (du/dx)*v - u*(dv/dx)) / v^2
         @assert length(f.args) == 2
