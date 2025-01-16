@@ -500,21 +500,25 @@ function test_simplify_deep()
     return
 end
 
-function test_simplify_shared()
+function test_simplify_shared_false()
     x = MOI.VariableIndex(1)
     f = MOI.ScalarNonlinearFunction(:^, Any[x, 1])
     g = MOI.ScalarNonlinearFunction(:+, Any[f, f])
     h = MOI.ScalarNonlinearFunction(:-, Any[g, g])
-    @test ≈(
-        MathOptSymbolicAD.simplify(h),
-        MOI.ScalarNonlinearFunction(
-            :-,
-            Any[
-                MOI.ScalarNonlinearFunction(:+, Any[x, x]),
-                MOI.ScalarNonlinearFunction(:+, Any[x, x]),
-            ],
-        ),
-    )
+    @test ≈(MathOptSymbolicAD.simplify!(h), false)
+    return
+end
+
+function test_simplify_shared_node()
+    x = MOI.VariableIndex(1)
+    f1 = MOI.ScalarNonlinearFunction(:^, Any[x, 1])
+    f2 = MOI.ScalarNonlinearFunction(:sin, Any[f1])
+    f3 = MOI.ScalarNonlinearFunction(:cos, Any[f1])
+    f4 = MOI.ScalarNonlinearFunction(:+, Any[f2, f3])
+    g1 = MOI.ScalarNonlinearFunction(:sin, Any[x])
+    g2 = MOI.ScalarNonlinearFunction(:cos, Any[x])
+    g3 = MOI.ScalarNonlinearFunction(:+, Any[g1, g2])
+    @test ≈(MathOptSymbolicAD.simplify!(f4), g3)
     return
 end
 
