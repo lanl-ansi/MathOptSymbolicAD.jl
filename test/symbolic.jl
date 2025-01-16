@@ -88,6 +88,10 @@ function test_derivative()
         # :ifelse
         op_ifelse(z, x^2, x)=>op_ifelse(z, 2x, 1),
         # :atan
+        atan(
+            x,
+            sin(x),
+        )=>@force_nonlinear((x * cos(x) + sin(x)) / (x^2 + sin(x)^2)),
         # :min
         min(x, x^2)=>op_ifelse(op_less_than_or_equal_to(x, min(x, x^2)), 1, 2x),
         # :max

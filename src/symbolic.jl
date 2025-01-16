@@ -166,7 +166,20 @@ function derivative(f::MOI.ScalarNonlinearFunction, x::MOI.VariableIndex)
             Any[f.args[1], derivative(f.args[2], x), derivative(f.args[3], x)],
         )
     elseif f.head == :atan
-        # TODO
+        @assert length(f.args) == 2
+        u, v = f.args
+        du_dx, dv_dx = derivative(u, x), derivative(v, x)
+        u_2 = MOI.ScalarNonlinearFunction(:^, Any[u, 2])
+        v_2 = MOI.ScalarNonlinearFunction(:^, Any[v, 2])
+        u_dv_dx = MOI.ScalarNonlinearFunction(:*, Any[u, dv_dx])
+        v_du_dx = MOI.ScalarNonlinearFunction(:*, Any[v, du_dx])
+        return MOI.ScalarNonlinearFunction(
+            :/,
+            Any[
+                MOI.ScalarNonlinearFunction(:+, Any[u_dv_dx, v_du_dx]),
+                MOI.ScalarNonlinearFunction(:+, Any[u_2, v_2]),
+            ],
+        )
     elseif f.head == :min
         g = derivative(f.args[end], x)
         for i in length(f.args)-1:-1:1
