@@ -452,40 +452,38 @@ function variables(f::MOI.AbstractScalarFunction)
 end
 
 variables(::Real) = MOI.VariableIndex[]
-variables!(ret, ::Real) = nothing
 
-function variables!(ret, f::MOI.VariableIndex)
+variables!(::Vector{MOI.VariableIndex}, ::Real) = nothing
+
+function variables!(ret::Vector{MOI.VariableIndex}, f::MOI.VariableIndex)
     if !(f in ret)
         push!(ret, f)
     end
     return
 end
 
-function variables!(ret, f::MOI.ScalarAffineTerm)
-    if !(f.variable in ret)
-        push!(ret, f.variable)
-    end
+function variables!(ret::Vector{MOI.VariableIndex}, f::MOI.ScalarAffineTerm)
+    variables!(ret, f.variable)
     return
 end
 
-function variables!(ret, f::MOI.ScalarAffineFunction)
+function variables!(ret::Vector{MOI.VariableIndex}, f::MOI.ScalarAffineFunction)
     for term in f.terms
         variables!(ret, term)
     end
     return
 end
 
-function variables!(ret, f::MOI.ScalarQuadraticTerm)
-    if !(f.variable_1 in ret)
-        push!(ret, f.variable_1)
-    end
-    if !(f.variable_2 in ret)
-        push!(ret, f.variable_2)
-    end
+function variables!(ret::Vector{MOI.VariableIndex}, f::MOI.ScalarQuadraticTerm)
+    variables!(ret, f.variable_1)
+    variables!(ret, f.variable_2)
     return
 end
 
-function variables!(ret, f::MOI.ScalarQuadraticFunction)
+function variables!(
+    ret::Vector{MOI.VariableIndex},
+    f::MOI.ScalarQuadraticFunction,
+)
     for term in f.affine_terms
         variables!(ret, term)
     end
@@ -495,29 +493,28 @@ function variables!(ret, f::MOI.ScalarQuadraticFunction)
     return
 end
 
-function variables!(ret, f::MOI.ScalarNonlinearFunction)
-    for arg in f.args
-        variables!(ret, arg)
+function variables!(
+    ret::Vector{MOI.VariableIndex},
+    f::MOI.ScalarNonlinearFunction,
+)
+    stack = Any[f]
+    while !isempty(stack)
+        arg = pop!(stack)
+        if arg isa MOI.ScalarNonlinearFunction
+            append!(stack, arg.args)
+        else
+            variables!(ret, arg)
+        end
     end
     return
 end
 
 gradient(::Real) = Dict{MOI.VariableIndex,Any}()
+
 function gradient(f::MOI.AbstractScalarFunction)
-    return Dict{MOI.VariableIndex,Any}(
-        x => simplify(derivative(f, x)) for x in variables(f)
-    )
+    ret = Dict{MOI.VariableIndex,Any}()
+    for x in variables(f)
+        ret[x] = simplify(derivative(f, x))
+    end
+    return ret
 end
-
-struct Node
-end
-
-struct Tape
-    nodes::Vector{Node}
-    output::Vector{Float64}
-end
-
-function evaluate(f::Vector{Any}, x::Dict{MOI.VariableIndex,Float64})
-    return
-end
-
