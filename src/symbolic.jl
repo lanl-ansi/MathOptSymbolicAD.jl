@@ -326,16 +326,23 @@ end
 """
     simplify!(::Val{head}, f::MOI.ScalarNonlinearFunction)
 
-Return a simplified version of `f` where the head of `f` is `head`.
+Simplify the function `f` in-place and return either the function `f` or a
+new object if `f` can be represented in a simpler type.
 
-## Why
+## Val
 
-Implementing this method enables custom simplification rules for different
-operators without needing a giant switch statement.
+The `head` in `Val{head}` is taken from `f.head`. This function should be called
+as:
+```julia
+f = simplify!(Val(f.head), f)
+```
+
+Implementing a method that dispatches on `head` enables custom simplification
+rules for different operators without needing a giant switch statement.
 
 ## Note
 
-It is important that this function does not recursively call `simplify`. Deal
+It is important that this function does not recursively call `simplify!`. Deal
 only with the immediate operator. The children arguments will already be
 simplified.
 """
@@ -365,25 +372,19 @@ function simplify!(::Val{:*}, f::MOI.ScalarNonlinearFunction)
             push!(new_args, arg)
         end
     end
-    if isempty(new_args)
+    if length(new_args) == 0
+        # *() -> true
         return true
     elseif length(new_args) == 1
+        # *(x) -> x
         return only(new_args)
     end
-    return MOI.ScalarNonlinearFunction(:*, new_args)
+    resize!(f.args, length(new_args))
+    copyto!(f.args, new_args)
+    return f
 end
 
 function simplify!(::Val{:+}, f::MOI.ScalarNonlinearFunction)
-    if length(f.args) == 1
-        # +(x) -> x
-        return only(f.args)
-    elseif length(f.args) == 2 && _isexpr(f.args[2], :-, 1)
-        # +(x, -y) -> -(x, y)
-        return MOI.ScalarNonlinearFunction(
-            :-,
-            Any[f.args[1], f.args[2].args[1]],
-        )
-    end
     new_args = Any[]
     first_constant = 0
     for arg in f.args
@@ -404,14 +405,22 @@ function simplify!(::Val{:+}, f::MOI.ScalarNonlinearFunction)
             push!(new_args, arg)
         end
     end
-    if isempty(new_args)
+    if length(new_args) == 0
         # +() -> false
         return false
     elseif length(new_args) == 1
         # +(x) -> x
         return only(new_args)
+    elseif length(f.args) == 2 && _isexpr(f.args[2], :-, 1)
+        # +(x, -y) -> -(x, y)
+        return MOI.ScalarNonlinearFunction(
+            :-,
+            Any[f.args[1], f.args[2].args[1]],
+        )
     end
-    return MOI.ScalarNonlinearFunction(:+, new_args)
+    resize!(f.args, length(new_args))
+    copyto!(f.args, new_args)
+    return f
 end
 
 function simplify!(::Val{:-}, f::MOI.ScalarNonlinearFunction)
@@ -421,15 +430,16 @@ function simplify!(::Val{:-}, f::MOI.ScalarNonlinearFunction)
             return f.args[1].args[1]
         end
     elseif length(f.args) == 2
-        if _iszero(f.args[1])
+        if f.args[1] == f.args[2]
+            # x - x => 0
+            return false
+        elseif _iszero(f.args[1])
             # 0 - x => -x
-            return MOI.ScalarNonlinearFunction(:-, Any[f.args[2]])
+            popfirst!(f.args)
+            return f
         elseif _iszero(f.args[2])
             # x - 0 => x
             return f.args[1]
-        elseif f.args[1] == f.args[2]
-            # x - x => 0
-            return false
         elseif _isexpr(f.args[2], :-, 1)
             # x - -(y) => x + y
             return MOI.ScalarNonlinearFunction(
