@@ -281,6 +281,12 @@ function test_simplify_ScalarQuadraticFunction()
         1.0,
     )
     @test MathOptSymbolicAD.simplify(f) ≈ 1.0 * x + 1.0
+    f = MOI.ScalarQuadraticFunction(
+        MOI.ScalarQuadraticTerm{Float64}[],
+        MOI.ScalarAffineTerm{Float64}[],
+        2.0,
+    )
+    @test MathOptSymbolicAD.simplify(f) === 2.0
     @test MathOptSymbolicAD.simplify(1.0 * x * x + 1.0) ≈ 1.0 * x * x + 1.0
     g = 1.0 * x * x + 2.0 * x * x + 1.0
     @test MathOptSymbolicAD.simplify(g) ≈ 3.0 * x * x + 1.0
