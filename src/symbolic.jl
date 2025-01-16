@@ -501,7 +501,11 @@ function variables!(
     while !isempty(stack)
         arg = pop!(stack)
         if arg isa MOI.ScalarNonlinearFunction
-            append!(stack, arg.args)
+            # We need to push the args on in reverse order so that we iterate
+            # across the tree from left to right.
+            for i in reverse(1:length(arg.args))
+                push!(stack, arg.args[i])
+            end
         else
             variables!(ret, arg)
         end
