@@ -125,38 +125,6 @@ function test_derivative_error()
     return
 end
 
-function test_gradient()
-    model = Model()
-    @variable(model, x)
-    @variable(model, y)
-    @variable(model, z)
-    @testset "$f" for (f, fp) in Any[
-        # ::Real
-        1.0=>Dict(),
-        # ::AffExpr
-        x=>Dict(x => 1),
-        x+y=>Dict(x => 1, y => 1),
-        2x+y=>Dict(x => 2, y => 1),
-        2x+3y+1=>Dict(x => 2, y => 3),
-        # ::QuadExpr
-        2x^2+3y+z=>Dict(x => 4x, y => 3, z => 1),
-        # ::NonlinearExpr
-        sin(x)=>Dict(x => cos(x)),
-        sin(x + y)=>Dict(x => cos(x + y), y => cos(x + y)),
-        sin(x + 2y)=>Dict(x => cos(x + 2y), y => cos(x + 2y) * 2),
-    ]
-        g = MathOptSymbolicAD.gradient(moi_function(f))
-        h = Dict{MOI.VariableIndex,Any}(
-            index(k) => moi_function(v) for (k, v) in fp
-        )
-        @test length(g) == length(h)
-        for k in keys(g)
-            @test g[k] ≈ h[k]
-        end
-    end
-    return
-end
-
 function test_simplify()
     model = Model()
     @variable(model, x)

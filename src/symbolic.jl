@@ -558,23 +558,16 @@ function variables!(
     return
 end
 
-gradient(::Real) = Dict{MOI.VariableIndex,Any}()
-
-function gradient(f::MOI.AbstractScalarFunction)
-    ret = Dict{MOI.VariableIndex,Any}()
-    for x in variables(f)
-        ret[x] = simplify(derivative(f, x))
-    end
-    return ret
-end
-
-function gradient_and_hessian(f::MOI.AbstractScalarFunction)
-    x = variables(f)
+function gradient_and_hessian(
+    filter_fn::F,
+    f::MOI.AbstractScalarFunction,
+) where {F<:Function}
+    x = filter!(filter_fn, variables(f))
     ∇f, H, ∇²f = Any[], Tuple{Int,Int}[], Any[]
     for (i, xi) in enumerate(x)
         ∇fi = simplify(derivative(f, xi))
         push!(∇f, ∇fi)
-        for xj in variables(∇fi)
+        for xj in filter!(filter_fn, variables(∇fi))
             j = findfirst(==(xj), x)
             if i > j
                 continue  # Don't need lower triangle
