@@ -134,7 +134,7 @@ end
 
 function test_derivative_error()
     x = MOI.VariableIndex(1)
-    f = MOI.ScalarNonlinearFunction(:foo, Any[x])
+    f = MOI.ScalarNonlinearFunction(:foo, Any[x, x])
     @test_throws(MOI.UnsupportedNonlinearOperator, SymbolicAD.derivative(f, x),)
     return
 end
@@ -635,6 +635,21 @@ function test_packed_operator_bit_fiddling()
         @test id == registry.comparison_operator_to_id[op]
         @test nargs == 2
     end
+    MOI.Nonlinear.register_operator(registry, :op_foo, 1, x -> x^2)
+    D = SymbolicAD.__DERIVATIVE__
+    for (prefix, ret_type) in (
+        "" => :univariate,
+        D => :univariate_derivative,
+        (D * D) => :univariate_second_derivative,
+    )
+        op = Symbol("$(prefix)op_foo")
+        operator = SymbolicAD._op_nargs_to_operator(registry, op, 1)
+        type, id, nargs = SymbolicAD._operator_to_type_id_nargs(operator)
+        @test type == ret_type
+        @test id == registry.univariate_operator_to_id[:op_foo]
+        @test id >= registry.univariate_user_operator_start
+        @test nargs == 1
+    end
     return
 end
 
@@ -722,6 +737,18 @@ function test_SymbolicAD_DAG()
     dag = SymbolicAD._DAG(registry, f)
     @test SymbolicAD._evaluate!(dag, [2.5], Float64[]) === nothing
     @test dag.result[dag.indices] == [3.0, 2.5, 3.5, 24.0, sin(2.5)]
+    return
+end
+
+function test_SymbolicAD_univariate_registered()
+    x = MOI.VariableIndex(1)
+    model = MOI.Nonlinear.Model()
+    MOI.Nonlinear.register_operator(model, :op_foo, 1, x -> x^2)
+    MOI.Nonlinear.set_objective(model, :(op_foo($x - 0.5)))
+    evaluator = MOI.Nonlinear.Evaluator(model, SymbolicAD.SymbolicMode(), [x])
+    MOI.initialize(evaluator, [:Grad, :Jac, :Hess])
+    x = [1.0]
+    @test MOI.eval_objective(evaluator, x) == 0.25
     return
 end
 

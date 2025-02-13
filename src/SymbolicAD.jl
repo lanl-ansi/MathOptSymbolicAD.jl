@@ -465,36 +465,60 @@ function _replace_expression(node::Symbol, u)
     return node
 end
 
+"""
+    __DERIVATIVE__ = "__DERIVATIVE__"
+
+This constant is is prefixed to the name of univariate operators to indicate
+that we should compute their derivative.
+
+If `f.head` is itself a __DERIVATIVE__, then this will create a second
+derivative like `__DERIVATIVE____DERIVATIVE__\$(f.head)`.
+
+Munging the `.head` field like this seems a bit hacky, but it is simpler than
+the alternatives like `SNF(:derivative, Any[SNF(:f, Any[x]])])`, because this
+would require changes to the already complicated expression walker for
+evaluating the expression.
+
+The String value of this constant is arbitrary. It just needs to be something
+that the user would never write themselves.
+"""
+const __DERIVATIVE__ = "__DERIVATIVE__"
+
 function derivative(f::MOI.ScalarNonlinearFunction, x::MOI.VariableIndex)
     if length(f.args) == 1
         u = only(f.args)
+        du_dx = derivative(u, x)
         if f.head == :+
-            return derivative(u, x)
+            return du_dx
         elseif f.head == :-
-            return MOI.ScalarNonlinearFunction(:-, Any[derivative(u, x)])
+            return MOI.ScalarNonlinearFunction(:-, Any[du_dx])
         elseif f.head == :abs
             df_du = MOI.ScalarNonlinearFunction(
                 :ifelse,
                 Any[MOI.ScalarNonlinearFunction(:>=, Any[u, 0]), 1, -1],
             )
-            return MOI.ScalarNonlinearFunction(:*, Any[df_du, derivative(u, x)])
+            return MOI.ScalarNonlinearFunction(:*, Any[df_du, du_dx])
         elseif f.head == :sign
             return false
         elseif f.head == :deg2rad
             df_du = deg2rad(1)
-            return MOI.ScalarNonlinearFunction(:*, Any[df_du, derivative(u, x)])
+            return MOI.ScalarNonlinearFunction(:*, Any[df_du, du_dx])
         elseif f.head == :rad2deg
             df_du = rad2deg(1)
-            return MOI.ScalarNonlinearFunction(:*, Any[df_du, derivative(u, x)])
+            return MOI.ScalarNonlinearFunction(:*, Any[df_du, du_dx])
         end
         for (key, df, _) in MOI.Nonlinear.SYMBOLIC_UNIVARIATE_EXPRESSIONS
             if key == f.head
                 # The chain rule: d(f(g(x))) / dx = f'(g(x)) * g'(x)
                 df_du = _replace_expression(copy(df), u)
-                du_dx = derivative(u, x)
                 return MOI.ScalarNonlinearFunction(:*, Any[df_du, du_dx])
             end
         end
+        # Delay derivative until evaluation. This may result in a later
+        # UnsupportedNonlinearOperator error, but we can't tell just yet.
+        d_op = Symbol(__DERIVATIVE__ * "$(f.head)")
+        df_du = MOI.ScalarNonlinearFunction(d_op, Any[u])
+        return MOI.ScalarNonlinearFunction(:*, Any[df_du, du_dx])
     end
     if f.head == :+
         # d/dx(+(args...)) = +(d/dx args)
@@ -701,12 +725,12 @@ end
 
 # operator is a (mask ⊻ id, nargs)::Tuple{Int32,Int32}, packed into an Int64
 # This is based on the assumptions that:
-#  1. we don't have more than typemax(Int32) >> 2 operators
+#  1. we don't have more than typemax(Int32) >> 4 operators
 #  2. we don't have more than typemax(Int32) input arguments
 # both of these seem quite sensible.
 function _mask_id_nargs_to_operator(mask::UInt32, id::Int, nargs::Int)
     @assert nargs <= typemax(Int32)
-    @assert id <= (typemax(Int32) >> 2)
+    @assert id <= (typemax(Int32) >> 4)
     return xor(Int64(mask ⊻ Int32(id)) << 32, Int64(nargs))
 end
 
@@ -716,34 +740,52 @@ function _op_nargs_to_operator(
     nargs::Int,
 )
     if nargs == 1
-        if (ret = get(reg.univariate_operator_to_id, op, nothing)) !== nothing
+        op_to_id = reg.univariate_operator_to_id
+        if (ret = get(op_to_id, op, nothing)) !== nothing
             return _mask_id_nargs_to_operator(:0x00000000, ret, nargs)
+        end
+        str_op = string(op)
+        prefix_hessian = __DERIVATIVE__ * __DERIVATIVE__
+        if startswith(str_op, prefix_hessian)
+            f_op = Symbol(replace(str_op, prefix_hessian => ""))
+            if (ret = get(op_to_id, f_op, nothing)) !== nothing
+                return _mask_id_nargs_to_operator(:0x20000000, ret, nargs)
+            end
+        elseif startswith(str_op, __DERIVATIVE__)
+            f_op = Symbol(replace(str_op, __DERIVATIVE__ => ""))
+            if (ret = get(op_to_id, f_op, nothing)) !== nothing
+                return _mask_id_nargs_to_operator(:0x10000000, ret, nargs)
+            end
         end
     end
     if (ret = get(reg.multivariate_operator_to_id, op, nothing)) !== nothing
-        return _mask_id_nargs_to_operator(:0x20000000, ret, nargs)
+        return _mask_id_nargs_to_operator(:0x30000000, ret, nargs)
     end
     if (ret = get(reg.logic_operator_to_id, op, nothing)) !== nothing
         return _mask_id_nargs_to_operator(0x40000000, ret, nargs)
     end
     ret = reg.comparison_operator_to_id[op]
-    return _mask_id_nargs_to_operator(0x60000000, ret, nargs)
+    return _mask_id_nargs_to_operator(0x50000000, ret, nargs)
 end
 
 function _operator_to_type_id_nargs(operator::Int64)::Tuple{Symbol,UInt32,Int64}
     @assert operator > 0
     type_id = Int32(operator >> 32)
-    type = type_id & 0x60000000
+    type = type_id & 0x70000000
     id = type_id - type
     nargs = operator - (Int64(type_id) << 32)
     if type == 0x00000000
         return :univariate, id, nargs
+    elseif type == 0x10000000
+        return :univariate_derivative, id, nargs
     elseif type == 0x20000000
+        return :univariate_second_derivative, id, nargs
+    elseif type == 0x30000000
         return :multivariate, id, nargs
     elseif type == 0x40000000
         return :logic, id, nargs
     else
-        @assert type == 0x60000000
+        @assert type == 0x50000000
         return :comparison, id, nargs
     end
 end
@@ -1010,6 +1052,20 @@ function _evaluate!(dag::_DAG, x::AbstractVector{Float64}, p::Vector{Float64})
             if type == :univariate
                 @assert nargs == 1
                 MOI.Nonlinear.eval_univariate_function(
+                    reg,
+                    op,
+                    dag.result[dag.children[node.data]],
+                )
+            elseif type == :univariate_derivative
+                @assert nargs == 1
+                MOI.Nonlinear.eval_univariate_gradient(
+                    reg,
+                    op,
+                    dag.result[dag.children[node.data]],
+                )
+            elseif type == :univariate_second_derivative
+                @assert nargs == 1
+                MOI.Nonlinear.eval_univariate_hessian(
                     reg,
                     op,
                     dag.result[dag.children[node.data]],
