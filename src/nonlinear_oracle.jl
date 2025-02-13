@@ -256,30 +256,21 @@ function _SymbolicsFunction(f::_Function, features::Vector{Symbol})
     p, x = collect(p), collect(x)
     f_expr = _expr_to_symbolics(f.model, f.expr, p, x)
     f = Symbolics.build_function(f_expr, p, x; expression = Val{false})
-    if :Jac in features || :Grad in features
-        ∇f_expr = Symbolics.gradient(f_expr, x)
-        _, g! = Symbolics.build_function(∇f_expr, p, x; expression = Val{false})
-        g_cache = zeros(length(x))
-    else
-        g!, g_cache = nothing, Float64[]
-    end
-    if :Hess in features
-        ∇²f_expr_square = Symbolics.sparsejacobian(∇f_expr, x)
-        # ∇²f_expr_square is sparse but it is also symmetrical. MathOptInterface
-        # needs only the lower-triangular (technically, it doesn't matter which
-        # triangle, but let's choose the lower-triangular for simplicity).
-        I, J, V = SparseArrays.findnz(∇²f_expr_square)
-        # Rather than using a SparseArray as storage, convert to MOI's
-        # ((i, j), v) datastructure. This simplifies
-        # `hessian_lagrangian_structure` calls later.
-        ∇²f_expr = [V[i] for i in 1:length(I) if I[i] >= J[i]]
-        ∇²f_structure = [(I[i], J[i]) for i in 1:length(I) if I[i] >= J[i]]
-        _, h! =
-            Symbolics.build_function(∇²f_expr, p, x; expression = Val{false})
-        h_cache = zeros(length(∇²f_structure))
-    else
-        h!, h_cache, ∇²f_structure = nothing, Float64[], Tuple{Int,Int}[]
-    end
+    ∇f_expr = Symbolics.gradient(f_expr, x)
+    _, g! = Symbolics.build_function(∇f_expr, p, x; expression = Val{false})
+    g_cache = zeros(length(x))
+    ∇²f_expr_square = Symbolics.sparsejacobian(∇f_expr, x)
+    # ∇²f_expr_square is sparse but it is also symmetrical. MathOptInterface
+    # needs only the lower-triangular (technically, it doesn't matter which
+    # triangle, but let's choose the lower-triangular for simplicity).
+    I, J, V = SparseArrays.findnz(∇²f_expr_square)
+    # Rather than using a SparseArray as storage, convert to MOI's
+    # ((i, j), v) datastructure. This simplifies
+    # `hessian_lagrangian_structure` calls later.
+    ∇²f_expr = [V[i] for i in 1:length(I) if I[i] >= J[i]]
+    ∇²f_structure = [(I[i], J[i]) for i in 1:length(I) if I[i] >= J[i]]
+    _, h! = Symbolics.build_function(∇²f_expr, p, x; expression = Val{false})
+    h_cache = zeros(length(∇²f_structure))
     return _SymbolicsFunction(f, g!, h!, g_cache, h_cache, ∇²f_structure)
 end
 

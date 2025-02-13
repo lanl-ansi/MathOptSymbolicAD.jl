@@ -249,12 +249,10 @@ function test_optimizer_clnlbeam(; N::Int = 10)
         @NLconstraint(model, x[i+1] - x[i] == h / 2 * (sin(t[i+1]) + sin(t[i])))
         @constraint(model, t[i+1] - t[i] == h / 2 * (u[i+1] - u[i]))
     end
-    set_attribute(
-        model,
-        MOI.AutomaticDifferentiationBackend(),
-        MathOptSymbolicAD.DefaultBackend(),
+    optimize!(
+        model;
+        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
     )
-    optimize!(model)
     Test.@test isapprox(objective_value(model), 350; atol = 1e-6)
     t_sol = value.(t)
     u_sol = value.(u)
@@ -328,12 +326,10 @@ function test_user_defined_functions()
     register(model, :mysin, 1, a -> sin(a); autodiff = true)
     register(model, :pow, 2, (a, b) -> a^b; autodiff = true)
     @NLobjective(model, Max, mysin(x) + log(x) + dawson(x) - pow(x, 2))
-    set_attribute(
-        model,
-        MOI.AutomaticDifferentiationBackend(),
-        MathOptSymbolicAD.DefaultBackend(),
+    optimize!(
+        model;
+        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
     )
-    optimize!(model)
     Test.@test termination_status(model) == LOCALLY_SOLVED
     return
 end
@@ -364,12 +360,10 @@ function test_nested_subexpressions()
     @NLexpression(model, my_expr1, x - 1)
     @NLexpression(model, my_expr2, my_expr1^2)
     @NLobjective(model, Min, my_expr2)
-    set_attribute(
-        model,
-        MOI.AutomaticDifferentiationBackend(),
-        MathOptSymbolicAD.DefaultBackend(),
+    optimize!(
+        model;
+        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
     )
-    optimize!(model)
     Test.@test termination_status(model) == LOCALLY_SOLVED
     Test.@test ≈(value(x), 1.0; atol = 1e-3)
     return
@@ -398,12 +392,10 @@ function test_constant_subexpressions()
     @NLexpression(model, my_expr1, 1.0)
     @NLexpression(model, my_expr2, x)
     @NLobjective(model, Min, (my_expr2 - my_expr1)^2)
-    set_attribute(
-        model,
-        MOI.AutomaticDifferentiationBackend(),
-        MathOptSymbolicAD.DefaultBackend(),
+    optimize!(
+        model;
+        _differentiation_backend = MathOptSymbolicAD.DefaultBackend(),
     )
-    optimize!(model)
     Test.@test termination_status(model) == LOCALLY_SOLVED
     Test.@test ≈(value(x), 1.0; atol = 1e-3)
     return
@@ -440,6 +432,71 @@ function test_logic_comparison_expr()
     )
     optimize!(model)
     Test.@test termination_status(model) == LOCALLY_SOLVED
+    return
+end
+
+function test_logic_comparison_or_expr()
+    if VERSION < v"1.7"
+        return  # Symbolics doesn't support Base.ifelse in Julia v1.6
+    end
+    model = Model(Ipopt.Optimizer)
+    @variable(model, -1 <= x <= 1)
+    @objective(model, Max, ifelse(x < -0.5 || 0.5 < x, 0, 1 - x^2))
+    set_attribute(
+        model,
+        MOI.AutomaticDifferentiationBackend(),
+        MathOptSymbolicAD.DefaultBackend(),
+    )
+    optimize!(model)
+    Test.@test termination_status(model) == LOCALLY_SOLVED
+    return
+end
+
+function test_default_x_to_x()
+    model = Model(Ipopt.Optimizer)
+    @variable(model, 0.1 <= x <= 1)
+    @objective(model, Min, x^x)
+    set_attribute(
+        model,
+        MOI.AutomaticDifferentiationBackend(),
+        MathOptSymbolicAD.ThreadedBackend(),
+    )
+    optimize!(model)
+    Test.@test termination_status(model) == LOCALLY_SOLVED
+    Test.@test ≈(value(x), 0.37; atol = 1e-2)
+    return
+end
+
+function test_default_parameter()
+    model = Model(Ipopt.Optimizer)
+    @variable(model, 0.1 <= x <= 1)
+    @variable(model, p in Parameter(2))
+    @objective(model, Min, x^p)
+    set_attribute(
+        model,
+        MOI.AutomaticDifferentiationBackend(),
+        MathOptSymbolicAD.DefaultBackend(),
+    )
+    optimize!(model)
+    Test.@test termination_status(model) == LOCALLY_SOLVED
+    Test.@test ≈(value(x), 0.1; atol = 1e-2)
+    Test.@test ≈(objective_value(model), 0.1^2; atol = 1e-2)
+    return
+end
+
+function test_threaded_objective()
+    model = Model(Ipopt.Optimizer)
+    @variable(model, -1 <= x <= 1)
+    @objective(model, Min, (x - 1)^4)
+    set_attribute(
+        model,
+        MOI.AutomaticDifferentiationBackend(),
+        MathOptSymbolicAD.ThreadedBackend(),
+    )
+    @constraint(model, sin(x) <= 2)  # non-binding constraint
+    optimize!(model)
+    Test.@test termination_status(model) == LOCALLY_SOLVED
+    Test.@test ≈(value(x), 1.0; atol = 1e-2)
     return
 end
 

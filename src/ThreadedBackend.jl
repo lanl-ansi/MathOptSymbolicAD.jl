@@ -96,7 +96,7 @@ function MOI.eval_hessian_lagrangian(
     μ::AbstractVector{Float64},
 )
     fill!(H, 0.0)
-    if oracle.objective !== nothing && !iszero(σ)
+    if oracle.objective !== nothing
         # It is important that we do not use any local variables that also
         # appear in the `Threads.@threads` block, otherwise Julia will create a
         # Core.Box. I also ran into some confusing debug issues, where we would
@@ -108,9 +108,6 @@ function MOI.eval_hessian_lagrangian(
     end
     Threads.@threads for offset in oracle.backend.offsets
         for c in offset
-            if iszero(μ[c.index])
-                continue
-            end
             h = _eval_hessian(oracle, oracle.constraints[c.index], x)
             for j in eachindex(h)
                 H[c.∇²f_offset+j-1] = μ[c.index] * h[j]
