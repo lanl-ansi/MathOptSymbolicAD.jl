@@ -446,3 +446,5 @@ end
 end  # module
 
 RunTests.runtests()
+
+include("SymbolicAD.jl")

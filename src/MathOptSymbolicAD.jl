@@ -15,5 +15,6 @@ abstract type AbstractSymbolicBackend <:
 
 include("nonlinear_oracle.jl")
 include("ThreadedBackend.jl")
+include("SymbolicAD.jl")
 
 end
