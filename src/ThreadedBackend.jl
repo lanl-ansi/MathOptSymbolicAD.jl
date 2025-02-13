@@ -52,8 +52,7 @@ function MOI.eval_constraint(
 )
     Threads.@threads for offsets in oracle.backend.offsets
         for c in offsets
-            func = oracle.constraints[c.index]
-            @inbounds g[c.index] = _eval_function(oracle, func, x)
+            g[c.index] = _eval_function(oracle, oracle.constraints[c.index], x)
         end
     end
     return
@@ -66,10 +65,9 @@ function MOI.eval_constraint_jacobian(
 )
     Threads.@threads for offset in oracle.backend.offsets
         for c in offset
-            func = oracle.constraints[c.index]
-            g = _eval_gradient(oracle, func, x)
-            for i in 1:length(g)
-                @inbounds J[c.∇f_offset+i-1] = g[i]
+            g = _eval_gradient(oracle, oracle.constraints[c.index], x)
+            for i in eachindex(g)
+                J[c.∇f_offset+i-1] = g[i]
             end
         end
     end
@@ -98,23 +96,24 @@ function MOI.eval_hessian_lagrangian(
     μ::AbstractVector{Float64},
 )
     fill!(H, 0.0)
-    hessian_offset = 0
     if oracle.objective !== nothing && !iszero(σ)
-        h = _eval_hessian(oracle, oracle.objective, x)
-        for i in 1:length(h)
-            H[i] = σ * h[i]
+        # It is important that we do not use any local variables that also
+        # appear in the `Threads.@threads` block, otherwise Julia will create a
+        # Core.Box. I also ran into some confusing debug issues, where we would
+        # get out-of-bounds accesses.
+        h_obj = _eval_hessian(oracle, oracle.objective, x)
+        for i in eachindex(h_obj)
+            H[i] = σ * h_obj[i]
         end
-        hessian_offset += length(h)
     end
     Threads.@threads for offset in oracle.backend.offsets
         for c in offset
             if iszero(μ[c.index])
                 continue
             end
-            func = oracle.constraints[c.index]
-            h = _eval_hessian(oracle, func, x)
-            for i in 1:length(h)
-                @inbounds H[c.∇²f_offset+i-1] = μ[c.index] * h[i]
+            h = _eval_hessian(oracle, oracle.constraints[c.index], x)
+            for j in eachindex(h)
+                H[c.∇²f_offset+j-1] = μ[c.index] * h[j]
             end
         end
     end

@@ -29,8 +29,14 @@ For help, questions, comments, and suggestions, please
 
 ## Use with JuMP
 
-To use MathOptSymbolicAD.jl with JuMP, set the `MOI.AutomaticDifferentiationBackend()`
-attribute to `MathOptSymbolicAD.DefaultBackend()`:
+To use MathOptSymbolicAD.jl with JuMP, set the
+`MOI.AutomaticDifferentiationBackend()` attribute to one of the following:
+
+ * `MathOptSymbolicAD.DefaultBackend()`: a original backend that uses
+   `Symbolics.jl`
+ * `MathOptSymbolicAD.ThreadedBackend()`: a variation of `DefaultBackend` that
+   additionally uses multithreading to compute the Jacobian and Hessian
+   callbacks
 
 ```julia
 using JuMP
@@ -41,6 +47,8 @@ set_attribute(
     model,
     MOI.AutomaticDifferentiationBackend(),
     MathOptSymbolicAD.DefaultBackend(),
+    # or ...
+    # MathOptSymbolicAD.ThreadedBackend(),
 )
 @variable(model, x[1:2])
 @objective(model, Min, (1 - x[1])^2 + 100 * (x[2] - x[1]^2)^2)
