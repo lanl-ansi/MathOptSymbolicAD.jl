@@ -269,8 +269,7 @@ function _SymbolicsFunction(f::_Function, features::Vector{Symbol})
     # `hessian_lagrangian_structure` calls later.
     ∇²f_expr = [V[i] for i in 1:length(I) if I[i] >= J[i]]
     ∇²f_structure = [(I[i], J[i]) for i in 1:length(I) if I[i] >= J[i]]
-    _, h! =
-        Symbolics.build_function(∇²f_expr, p, x; expression = Val{false})
+    _, h! = Symbolics.build_function(∇²f_expr, p, x; expression = Val{false})
     h_cache = zeros(length(∇²f_structure))
     return _SymbolicsFunction(f, g!, h!, g_cache, h_cache, ∇²f_structure)
 end
