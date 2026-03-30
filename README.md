@@ -6,6 +6,22 @@
 [MathOptSymbolicAD.jl](https://github.com/lanl-ansi/MathOptSymbolicAD.jl) is a Julia
 package that implements a symbolic automatic differentiation backend for JuMP.
 
+## Deprecation notice
+
+This package is deprecated. 
+
+We have moved its functionality into MathOptInterface's `MOI.Nonlinear.SymbolicAD`
+submodule. Do:
+```julia
+using JuMP
+model = Model()
+set_attribute(
+    model,
+    MOI.AutomaticDifferentiationBackend(),
+    MOI.Nonlinear.SymbolicMode(),
+)
+```
+
 ## License
 
 MathOptSymbolicAD.jl is provided under a BSD-3 license as part of the Grid Optimization
